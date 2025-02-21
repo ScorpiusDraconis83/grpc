@@ -18,25 +18,23 @@
 
 #if GRPC_ARES == 1 && defined(GRPC_WINDOWS_SOCKET_ARES_EV_DRIVER)
 
+#include <ares.h>
+#include <grpc/support/log_windows.h>
 #include <winsock2.h>
 
-#include <ares.h>
-
 #include "absl/functional/any_invocable.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_format.h"
-
-#include <grpc/support/log_windows.h>
-
 #include "src/core/lib/address_utils/sockaddr_utils.h"
 #include "src/core/lib/event_engine/ares_resolver.h"
 #include "src/core/lib/event_engine/grpc_polled_fd.h"
 #include "src/core/lib/event_engine/windows/grpc_polled_fd_windows.h"
 #include "src/core/lib/event_engine/windows/win_socket.h"
-#include "src/core/lib/gprpp/debug_location.h"
-#include "src/core/lib/gprpp/sync.h"
 #include "src/core/lib/iomgr/error.h"
 #include "src/core/lib/slice/slice.h"
+#include "src/core/util/debug_location.h"
+#include "src/core/util/sync.h"
 
 // TODO(apolcyn): remove this hack after fixing upstream.
 // Our grpc/c-ares code on Windows uses the ares_set_socket_functions API,
@@ -48,8 +46,7 @@ struct iovec {
   size_t iov_len;
 };
 
-namespace grpc_event_engine {
-namespace experimental {
+namespace grpc_event_engine::experimental {
 namespace {
 
 constexpr int kRecvFromSourceAddrSize = 200;
@@ -81,7 +78,7 @@ grpc_slice FlattenIovec(const struct iovec* iov, int iov_count) {
 // instantiated at the top of the virtual socket function callstack.
 class WSAErrorContext {
  public:
-  explicit WSAErrorContext(){};
+  explicit WSAErrorContext() {};
 
   ~WSAErrorContext() {
     if (error_ != 0) {
@@ -127,13 +124,13 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
         event_engine_(event_engine) {}
 
   ~GrpcPolledFdWindows() override {
-    GRPC_ARES_RESOLVER_TRACE_LOG(
-        "fd:|%s| ~GrpcPolledFdWindows shutdown_called_: %d ", GetName(),
-        shutdown_called_);
+    GRPC_TRACE_LOG(cares_resolver, INFO)
+        << "(EventEngine c-ares resolver) fd:|" << GetName()
+        << "| ~GrpcPolledFdWindows shutdown_called_: " << shutdown_called_;
     grpc_core::CSliceUnref(read_buf_);
     grpc_core::CSliceUnref(write_buf_);
-    GPR_ASSERT(read_closure_ == nullptr);
-    GPR_ASSERT(write_closure_ == nullptr);
+    CHECK(read_closure_ == nullptr);
+    CHECK(write_closure_ == nullptr);
     if (!shutdown_called_) {
       winsocket_->Shutdown(DEBUG_LOCATION, "~GrpcPolledFdWindows");
     }
@@ -141,15 +138,15 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
 
   void RegisterForOnReadableLocked(
       absl::AnyInvocable<void(absl::Status)> read_closure) override {
-    GPR_ASSERT(read_closure_ == nullptr);
+    CHECK(read_closure_ == nullptr);
     read_closure_ = std::move(read_closure);
     grpc_core::CSliceUnref(read_buf_);
-    GPR_ASSERT(!read_buf_has_data_);
+    CHECK(!read_buf_has_data_);
     read_buf_ = GRPC_SLICE_MALLOC(kReadBufferSize);
     if (connect_done_) {
       ContinueRegisterForOnReadableLocked();
     } else {
-      GPR_ASSERT(pending_continue_register_for_on_readable_locked_ == false);
+      CHECK(pending_continue_register_for_on_readable_locked_ == false);
       pending_continue_register_for_on_readable_locked_ = true;
     }
   }
@@ -157,19 +154,21 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
   void RegisterForOnWriteableLocked(
       absl::AnyInvocable<void(absl::Status)> write_closure) override {
     if (socket_type_ == SOCK_DGRAM) {
-      GRPC_ARES_RESOLVER_TRACE_LOG(
-          "fd:|%s| RegisterForOnWriteableLocked called", GetName());
+      GRPC_TRACE_LOG(cares_resolver, INFO)
+          << "(EventEngine c-ares resolver) fd:|" << GetName()
+          << "| RegisterForOnWriteableLocked called";
     } else {
-      GPR_ASSERT(socket_type_ == SOCK_STREAM);
-      GRPC_ARES_RESOLVER_TRACE_LOG(
-          "fd:|%s| RegisterForOnWriteableLocked called tcp_write_state_: %d "
-          "connect_done_: %d",
-          GetName(), tcp_write_state_, connect_done_);
+      CHECK(socket_type_ == SOCK_STREAM);
+      GRPC_TRACE_LOG(cares_resolver, INFO)
+          << "(EventEngine c-ares resolver) fd:|" << GetName()
+          << "| RegisterForOnWriteableLocked called tcp_write_state_: "
+          << static_cast<int>(tcp_write_state_)
+          << " connect_done_: " << connect_done_;
     }
-    GPR_ASSERT(write_closure_ == nullptr);
+    CHECK(write_closure_ == nullptr);
     write_closure_ = std::move(write_closure);
     if (!connect_done_) {
-      GPR_ASSERT(!pending_continue_register_for_on_writeable_locked_);
+      CHECK(!pending_continue_register_for_on_writeable_locked_);
       pending_continue_register_for_on_writeable_locked_ = true;
     } else {
       ContinueRegisterForOnWriteableLocked();
@@ -179,11 +178,12 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
   bool IsFdStillReadableLocked() override { return read_buf_has_data_; }
 
   bool ShutdownLocked(absl::Status error) override {
-    GPR_ASSERT(!shutdown_called_);
+    CHECK(!shutdown_called_);
     if (!absl::IsCancelled(error)) {
       return false;
     }
-    GRPC_ARES_RESOLVER_TRACE_LOG("fd:|%s| ShutdownLocked", GetName());
+    GRPC_TRACE_LOG(cares_resolver, INFO) << "(EventEngine c-ares resolver) fd:|"
+                                         << GetName() << "| ShutdownLocked";
     shutdown_called_ = true;
     // The socket is disconnected and closed here since this is an external
     // cancel request, e.g. a timeout. c-ares shouldn't do anything on the
@@ -202,10 +202,10 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
   ares_ssize_t RecvFrom(WSAErrorContext* wsa_error_ctx, void* data,
                         ares_socket_t data_len, int /* flags */,
                         struct sockaddr* from, ares_socklen_t* from_len) {
-    GRPC_ARES_RESOLVER_TRACE_LOG(
-        "fd:|%s| RecvFrom called read_buf_has_data:%d Current read buf "
-        "length:|%d|",
-        GetName(), read_buf_has_data_, GRPC_SLICE_LENGTH(read_buf_));
+    GRPC_TRACE_LOG(cares_resolver, INFO)
+        << "(EventEngine c-ares resolver) fd:" << GetName()
+        << " RecvFrom called read_buf_has_data:" << read_buf_has_data_
+        << " Current read buf length:" << GRPC_SLICE_LENGTH(read_buf_);
     if (!read_buf_has_data_) {
       wsa_error_ctx->SetWSAError(WSAEWOULDBLOCK);
       return -1;
@@ -223,7 +223,7 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
     // c-ares overloads this recv_from virtual socket function to receive
     // data on both UDP and TCP sockets, and from is nullptr for TCP.
     if (from != nullptr) {
-      GPR_ASSERT(*from_len <= recv_from_source_addr_len_);
+      CHECK(*from_len >= recv_from_source_addr_len_);
       memcpy(from, &recv_from_source_addr_, recv_from_source_addr_len_);
       *from_len = recv_from_source_addr_len_;
     }
@@ -232,9 +232,10 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
 
   ares_ssize_t SendV(WSAErrorContext* wsa_error_ctx, const struct iovec* iov,
                      int iov_count) {
-    GRPC_ARES_RESOLVER_TRACE_LOG(
-        "fd:|%s| SendV called connect_done_:%d wsa_connect_error_:%d",
-        GetName(), connect_done_, wsa_connect_error_);
+    GRPC_TRACE_LOG(cares_resolver, INFO)
+        << "(EventEngine c-ares resolver) fd:|" << GetName()
+        << "| SendV called connect_done_:" << connect_done_
+        << " wsa_connect_error_:" << wsa_connect_error_;
     if (!connect_done_) {
       wsa_error_ctx->SetWSAError(WSAEWOULDBLOCK);
       return -1;
@@ -287,11 +288,11 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
   }
 
   void ContinueRegisterForOnReadableLocked() {
-    GRPC_ARES_RESOLVER_TRACE_LOG(
-        "fd:|%s| ContinueRegisterForOnReadableLocked "
-        "wsa_connect_error_:%d",
-        GetName(), wsa_connect_error_);
-    GPR_ASSERT(connect_done_);
+    GRPC_TRACE_LOG(cares_resolver, INFO)
+        << "(EventEngine c-ares resolver) fd:|" << GetName()
+        << "| ContinueRegisterForOnReadableLocked wsa_connect_error_:"
+        << wsa_connect_error_;
+    CHECK(connect_done_);
     if (wsa_connect_error_ != 0) {
       ScheduleAndNullReadClosure(GRPC_WSA_ERROR(wsa_connect_error_, "connect"));
       return;
@@ -308,11 +309,11 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
                     winsocket_->read_info()->overlapped(), nullptr) != 0) {
       int wsa_last_error = WSAGetLastError();
       char* msg = gpr_format_message(wsa_last_error);
-      GRPC_ARES_RESOLVER_TRACE_LOG(
-          "fd:|%s| ContinueRegisterForOnReadableLocked WSARecvFrom error "
-          "code:|%d| "
-          "msg:|%s|",
-          GetName(), wsa_last_error, msg);
+      GRPC_TRACE_LOG(cares_resolver, INFO)
+          << "(EventEngine c-ares resolver) fd:" << GetName()
+          << " ContinueRegisterForOnReadableLocked WSARecvFrom error "
+             "code:"
+          << wsa_last_error << " msg:" << msg;
       gpr_free(msg);
       if (wsa_last_error != WSA_IO_PENDING) {
         winsocket_->UnregisterReadCallback();
@@ -324,11 +325,11 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
   }
 
   void ContinueRegisterForOnWriteableLocked() {
-    GRPC_ARES_RESOLVER_TRACE_LOG(
-        "fd:|%s| ContinueRegisterForOnWriteableLocked "
-        "wsa_connect_error_:%d",
-        GetName(), wsa_connect_error_);
-    GPR_ASSERT(connect_done_);
+    GRPC_TRACE_LOG(cares_resolver, INFO)
+        << "(EventEngine c-ares resolver) fd:|" << GetName()
+        << "| ContinueRegisterForOnWriteableLocked wsa_connect_error_:"
+        << wsa_connect_error_;
+    CHECK(connect_done_);
     if (wsa_connect_error_ != 0) {
       ScheduleAndNullWriteClosure(
           GRPC_WSA_ERROR(wsa_connect_error_, "connect"));
@@ -338,7 +339,7 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
       ScheduleAndNullWriteClosure(absl::OkStatus());
       return;
     }
-    GPR_ASSERT(socket_type_ == SOCK_STREAM);
+    CHECK(socket_type_ == SOCK_STREAM);
     int wsa_error_code = 0;
     switch (tcp_write_state_) {
       case WRITE_IDLE:
@@ -371,12 +372,12 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
     int out = WSASend(winsocket_->raw_socket(), &buf, 1, bytes_sent_ptr, flags,
                       overlapped, nullptr);
     *wsa_error_code = WSAGetLastError();
-    GRPC_ARES_RESOLVER_TRACE_LOG(
-        "fd:|%s| SendWriteBuf WSASend buf.len:%d *bytes_sent_ptr:%d "
-        "overlapped:%p "
-        "return:%d *wsa_error_code:%d",
-        GetName(), buf.len, bytes_sent_ptr != nullptr ? *bytes_sent_ptr : 0,
-        overlapped, out, *wsa_error_code);
+    GRPC_TRACE_LOG(cares_resolver, INFO)
+        << "(EventEngine c-ares resolver) fd:" << GetName()
+        << " SendWriteBuf WSASend buf.len:" << buf.len << " *bytes_sent_ptr:"
+        << (bytes_sent_ptr != nullptr ? *bytes_sent_ptr : 0)
+        << " overlapped:" << overlapped << " return:" << out
+        << " *wsa_error_code:" << *wsa_error_code;
     return out;
   }
 
@@ -385,8 +386,9 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
     // c-ares doesn't handle retryable errors on writes of UDP sockets.
     // Therefore, the sendv handler for UDP sockets must only attempt
     // to write everything inline.
-    GRPC_ARES_RESOLVER_TRACE_LOG("fd:|%s| SendVUDP called", GetName());
-    GPR_ASSERT(GRPC_SLICE_LENGTH(write_buf_) == 0);
+    GRPC_TRACE_LOG(cares_resolver, INFO) << "(EventEngine c-ares resolver) fd:|"
+                                         << GetName() << "| SendVUDP called";
+    CHECK_EQ(GRPC_SLICE_LENGTH(write_buf_), 0);
     grpc_core::CSliceUnref(write_buf_);
     write_buf_ = FlattenIovec(iov, iov_count);
     DWORD bytes_sent = 0;
@@ -396,9 +398,10 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
       write_buf_ = grpc_empty_slice();
       wsa_error_ctx->SetWSAError(wsa_error_code);
       char* msg = gpr_format_message(wsa_error_code);
-      GRPC_ARES_RESOLVER_TRACE_LOG(
-          "fd:|%s| SendVUDP SendWriteBuf error code:%d msg:|%s|", GetName(),
-          wsa_error_code, msg);
+      GRPC_TRACE_LOG(cares_resolver, INFO)
+          << "(EventEngine c-ares resolver) fd:|" << GetName()
+          << "| SendVUDP SendWriteBuf error code:" << wsa_error_code << " msg:|"
+          << msg << "|";
       gpr_free(msg);
       return -1;
     }
@@ -414,8 +417,10 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
     // out in the background, and making further send progress in general, will
     // happen as long as c-ares continues to show interest in writeability on
     // this fd.
-    GRPC_ARES_RESOLVER_TRACE_LOG("fd:|%s| SendVTCP called tcp_write_state_:%d",
-                                 GetName(), tcp_write_state_);
+    GRPC_TRACE_LOG(cares_resolver, INFO)
+        << "(EventEngine c-ares resolver) fd:|" << GetName()
+        << "| SendVTCP called tcp_write_state_:"
+        << static_cast<int>(tcp_write_state_);
     switch (tcp_write_state_) {
       case WRITE_IDLE:
         tcp_write_state_ = WRITE_REQUESTED;
@@ -434,12 +439,12 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
         // send again. If c-ares still needs to send even more data, we'll get
         // to it eventually.
         grpc_slice currently_attempted = FlattenIovec(iov, iov_count);
-        GPR_ASSERT(GRPC_SLICE_LENGTH(currently_attempted) >=
-                   GRPC_SLICE_LENGTH(write_buf_));
+        CHECK(GRPC_SLICE_LENGTH(currently_attempted) >=
+              GRPC_SLICE_LENGTH(write_buf_));
         ares_ssize_t total_sent = 0;
         for (size_t i = 0; i < GRPC_SLICE_LENGTH(write_buf_); i++) {
-          GPR_ASSERT(GRPC_SLICE_START_PTR(currently_attempted)[i] ==
-                     GRPC_SLICE_START_PTR(write_buf_)[i]);
+          CHECK(GRPC_SLICE_START_PTR(currently_attempted)[i] ==
+                GRPC_SLICE_START_PTR(write_buf_)[i]);
           total_sent++;
         }
         grpc_core::CSliceUnref(currently_attempted);
@@ -452,15 +457,15 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
 
   void OnTcpConnect() {
     grpc_core::MutexLock lock(mu_);
-    GRPC_ARES_RESOLVER_TRACE_LOG(
-        "fd:%s InnerOnTcpConnectLocked "
-        "pending_register_for_readable:%d"
-        " pending_register_for_writeable:%d",
-        GetName(), pending_continue_register_for_on_readable_locked_,
-        pending_continue_register_for_on_writeable_locked_);
-    GPR_ASSERT(!connect_done_);
+    GRPC_TRACE_LOG(cares_resolver, INFO)
+        << "(EventEngine c-ares resolver) fd:" << GetName()
+        << " InnerOnTcpConnectLocked pending_register_for_readable:"
+        << pending_continue_register_for_on_readable_locked_
+        << " pending_register_for_writeable:"
+        << pending_continue_register_for_on_writeable_locked_;
+    CHECK(!connect_done_);
     connect_done_ = true;
-    GPR_ASSERT(wsa_connect_error_ == 0);
+    CHECK_EQ(wsa_connect_error_, 0);
     if (shutdown_called_) {
       wsa_connect_error_ = WSA_OPERATION_ABORTED;
     } else {
@@ -469,14 +474,14 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
       BOOL wsa_success = WSAGetOverlappedResult(
           winsocket_->raw_socket(), winsocket_->write_info()->overlapped(),
           &transferred_bytes, FALSE, &flags);
-      GPR_ASSERT(transferred_bytes == 0);
+      CHECK_EQ(transferred_bytes, 0);
       if (!wsa_success) {
         wsa_connect_error_ = WSAGetLastError();
         char* msg = gpr_format_message(wsa_connect_error_);
-        GRPC_ARES_RESOLVER_TRACE_LOG(
-            "fd:%s InnerOnTcpConnectLocked WSA overlapped result code:%d "
-            "msg:|%s|",
-            GetName(), wsa_connect_error_, msg);
+        GRPC_TRACE_LOG(cares_resolver, INFO)
+            << "(EventEngine c-ares resolver) fd:" << GetName()
+            << " InnerOnTcpConnectLocked WSA overlapped result code:"
+            << wsa_connect_error_ << " msg:|" << msg << "|";
         gpr_free(msg);
       }
     }
@@ -490,9 +495,10 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
 
   int ConnectUDP(WSAErrorContext* wsa_error_ctx, const struct sockaddr* target,
                  ares_socklen_t target_len) {
-    GRPC_ARES_RESOLVER_TRACE_LOG("fd:%s ConnectUDP", GetName());
-    GPR_ASSERT(!connect_done_);
-    GPR_ASSERT(wsa_connect_error_ == 0);
+    GRPC_TRACE_LOG(cares_resolver, INFO)
+        << "(EventEngine c-ares resolver) fd:" << GetName() << " ConnectUDP";
+    CHECK(!connect_done_);
+    CHECK_EQ(wsa_connect_error_, 0);
     SOCKET s = winsocket_->raw_socket();
     int out =
         WSAConnect(s, target, target_len, nullptr, nullptr, nullptr, nullptr);
@@ -500,8 +506,10 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
     wsa_error_ctx->SetWSAError(wsa_connect_error_);
     connect_done_ = true;
     char* msg = gpr_format_message(wsa_connect_error_);
-    GRPC_ARES_RESOLVER_TRACE_LOG("fd:%s WSAConnect error code:|%d| msg:|%s|",
-                                 GetName(), wsa_connect_error_, msg);
+    GRPC_TRACE_LOG(cares_resolver, INFO)
+        << "(EventEngine c-ares resolver) fd:" << GetName()
+        << " WSAConnect error code:|" << wsa_connect_error_ << "| msg:|" << msg
+        << "|";
     gpr_free(msg);
     // c-ares expects a posix-style connect API
     return out == 0 ? 0 : -1;
@@ -509,7 +517,8 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
 
   int ConnectTCP(WSAErrorContext* wsa_error_ctx, const struct sockaddr* target,
                  ares_socklen_t target_len) {
-    GRPC_ARES_RESOLVER_TRACE_LOG("fd:%s ConnectTCP", GetName());
+    GRPC_TRACE_LOG(cares_resolver, INFO)
+        << "(EventEngine c-ares resolver) fd:" << GetName() << " ConnectTCP";
     LPFN_CONNECTEX ConnectEx;
     GUID guid = WSAID_CONNECTEX;
     DWORD ioctl_num_bytes;
@@ -520,10 +529,10 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
       int wsa_last_error = WSAGetLastError();
       wsa_error_ctx->SetWSAError(wsa_last_error);
       char* msg = gpr_format_message(wsa_last_error);
-      GRPC_ARES_RESOLVER_TRACE_LOG(
-          "fd:%s WSAIoctl(SIO_GET_EXTENSION_FUNCTION_POINTER) error code:%d "
-          "msg:|%s|",
-          GetName(), wsa_last_error, msg);
+      GRPC_TRACE_LOG(cares_resolver, INFO)
+          << "(EventEngine c-ares resolver) fd:" << GetName()
+          << " WSAIoctl(SIO_GET_EXTENSION_FUNCTION_POINTER) error code:"
+          << wsa_last_error << " msg:|" << msg << "|";
       gpr_free(msg);
       connect_done_ = true;
       wsa_connect_error_ = wsa_last_error;
@@ -543,8 +552,9 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
       int wsa_last_error = WSAGetLastError();
       wsa_error_ctx->SetWSAError(wsa_last_error);
       char* msg = gpr_format_message(wsa_last_error);
-      GRPC_ARES_RESOLVER_TRACE_LOG("fd:%s bind error code:%d msg:|%s|",
-                                   GetName(), wsa_last_error, msg);
+      GRPC_TRACE_LOG(cares_resolver, INFO)
+          << "(EventEngine c-ares resolver) fd:" << GetName()
+          << " bind error code:" << wsa_last_error << " msg:|" << msg << "|";
       gpr_free(msg);
       connect_done_ = true;
       wsa_connect_error_ = wsa_last_error;
@@ -560,8 +570,10 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
       int wsa_last_error = WSAGetLastError();
       wsa_error_ctx->SetWSAError(wsa_last_error);
       char* msg = gpr_format_message(wsa_last_error);
-      GRPC_ARES_RESOLVER_TRACE_LOG("fd:%s ConnectEx error code:%d msg:|%s|",
-                                   GetName(), wsa_last_error, msg);
+      GRPC_TRACE_LOG(cares_resolver, INFO)
+          << "(EventEngine c-ares resolver) fd:" << GetName()
+          << " ConnectEx error code:" << wsa_last_error << " msg:|" << msg
+          << "|";
       gpr_free(msg);
       if (wsa_last_error == WSA_IO_PENDING) {
         // c-ares only understands WSAEINPROGRESS and EWOULDBLOCK error codes on
@@ -596,11 +608,12 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
       if (winsocket_->read_info()->result().wsa_error != WSAEMSGSIZE) {
         error = GRPC_WSA_ERROR(winsocket_->read_info()->result().wsa_error,
                                "OnIocpReadableInner");
-        GRPC_ARES_RESOLVER_TRACE_LOG(
-            "fd:|%s| OnIocpReadableInner winsocket_->read_info.wsa_error "
-            "code:|%d| msg:|%s|",
-            GetName(), winsocket_->read_info()->result().wsa_error,
-            grpc_core::StatusToString(error).c_str());
+        GRPC_TRACE_LOG(cares_resolver, INFO)
+            << "(EventEngine c-ares resolver) fd:|" << GetName()
+            << "| OnIocpReadableInner winsocket_->read_info.wsa_error "
+               "code:|"
+            << winsocket_->read_info()->result().wsa_error << "| msg:|"
+            << grpc_core::StatusToString(error) << "|";
       }
     }
     if (error.ok()) {
@@ -611,34 +624,40 @@ class GrpcPolledFdWindows : public GrpcPolledFd {
       grpc_core::CSliceUnref(read_buf_);
       read_buf_ = grpc_empty_slice();
     }
-    GRPC_ARES_RESOLVER_TRACE_LOG(
-        "fd:|%s| OnIocpReadable finishing. read buf length now:|%d|", GetName(),
-        GRPC_SLICE_LENGTH(read_buf_));
+    GRPC_TRACE_LOG(cares_resolver, INFO)
+        << "(EventEngine c-ares resolver) fd:|" << GetName()
+        << "| OnIocpReadable finishing. read buf length now:|"
+        << GRPC_SLICE_LENGTH(read_buf_) << "|";
     ScheduleAndNullReadClosure(error);
   }
 
   void OnIocpWriteable() {
     grpc_core::MutexLock lock(mu_);
-    GRPC_ARES_RESOLVER_TRACE_LOG("OnIocpWriteableInner. fd:|%s|", GetName());
-    GPR_ASSERT(socket_type_ == SOCK_STREAM);
+    GRPC_TRACE_LOG(cares_resolver, INFO)
+        << "(EventEngine c-ares resolver) OnIocpWriteableInner. fd:|"
+        << GetName() << "|";
+    CHECK(socket_type_ == SOCK_STREAM);
     absl::Status error;
     if (winsocket_->write_info()->result().wsa_error != 0) {
       error = GRPC_WSA_ERROR(winsocket_->write_info()->result().wsa_error,
                              "OnIocpWriteableInner");
-      GRPC_ARES_RESOLVER_TRACE_LOG(
-          "fd:|%s| OnIocpWriteableInner. winsocket_->write_info.wsa_error "
-          "code:|%d| msg:|%s|",
-          GetName(), winsocket_->write_info()->result().wsa_error,
-          grpc_core::StatusToString(error).c_str());
+      GRPC_TRACE_LOG(cares_resolver, INFO)
+          << "(EventEngine c-ares resolver) fd:|" << GetName()
+          << "| OnIocpWriteableInner. winsocket_->write_info.wsa_error "
+             "code:|"
+          << winsocket_->write_info()->result().wsa_error << "| msg:|"
+          << grpc_core::StatusToString(error) << "|";
     }
-    GPR_ASSERT(tcp_write_state_ == WRITE_PENDING);
+    CHECK(tcp_write_state_ == WRITE_PENDING);
     if (error.ok()) {
       tcp_write_state_ = WRITE_WAITING_FOR_VERIFICATION_UPON_RETRY;
       write_buf_ = grpc_slice_sub_no_ref(
           write_buf_, 0, winsocket_->write_info()->result().bytes_transferred);
-      GRPC_ARES_RESOLVER_TRACE_LOG(
-          "fd:|%s| OnIocpWriteableInner. bytes transferred:%d", GetName(),
-          winsocket_->write_info()->result().bytes_transferred);
+      GRPC_TRACE_LOG(cares_resolver, INFO)
+          << "(EventEngine c-ares resolver) fd:|" << GetName()
+          << "| OnIocpWriteableInner. bytes transferred:"
+          << winsocket_->write_info()->result().bytes_transferred;
+
     } else {
       grpc_core::CSliceUnref(write_buf_);
       write_buf_ = grpc_empty_slice();
@@ -685,8 +704,10 @@ class CustomSockFuncs {
  public:
   static ares_socket_t Socket(int af, int type, int protocol, void* user_data) {
     if (type != SOCK_DGRAM && type != SOCK_STREAM) {
-      GRPC_ARES_RESOLVER_TRACE_LOG("Socket called with invalid socket type:%d",
-                                   type);
+      GRPC_TRACE_LOG(cares_resolver, INFO)
+          << "(EventEngine c-ares resolver) Socket called with invalid socket "
+             "type:"
+          << type;
       return INVALID_SOCKET;
     }
     GrpcPolledFdFactoryWindows* self =
@@ -694,25 +715,27 @@ class CustomSockFuncs {
     SOCKET s = WSASocket(af, type, protocol, nullptr, 0,
                          IOCP::GetDefaultSocketFlags());
     if (s == INVALID_SOCKET) {
-      GRPC_ARES_RESOLVER_TRACE_LOG(
-          "WSASocket failed with params af:%d type:%d protocol:%d", af, type,
-          protocol);
+      GRPC_TRACE_LOG(cares_resolver, INFO)
+          << "(EventEngine c-ares resolver) WSASocket failed with params af:"
+          << af << " type:" << type << " protocol:" << protocol;
       return INVALID_SOCKET;
     }
     if (type == SOCK_STREAM) {
       absl::Status error = PrepareSocket(s);
       if (!error.ok()) {
-        GRPC_ARES_RESOLVER_TRACE_LOG("WSAIoctl failed with error: %s",
-                                     grpc_core::StatusToString(error).c_str());
+        GRPC_TRACE_LOG(cares_resolver, INFO)
+            << "(EventEngine c-ares resolver) WSAIoctl failed with error: "
+            << grpc_core::StatusToString(error);
         return INVALID_SOCKET;
       }
     }
     auto polled_fd = std::make_unique<GrpcPolledFdWindows>(
         self->iocp_->Watch(s), self->mu_, af, type, self->event_engine_);
-    GRPC_ARES_RESOLVER_TRACE_LOG(
-        "fd:|%s| created with params af:%d type:%d protocol:%d",
-        polled_fd->GetName(), af, type, protocol);
-    GPR_ASSERT(self->sockets_.insert({s, std::move(polled_fd)}).second);
+    GRPC_TRACE_LOG(cares_resolver, INFO)
+        << "(EventEngine c-ares resolver) fd:" << polled_fd->GetName()
+        << " created with params af:" << af << " type:" << type
+        << " protocol:" << protocol;
+    CHECK(self->sockets_.insert({s, std::move(polled_fd)}).second);
     return s;
   }
 
@@ -722,7 +745,7 @@ class CustomSockFuncs {
     GrpcPolledFdFactoryWindows* self =
         static_cast<GrpcPolledFdFactoryWindows*>(user_data);
     auto it = self->sockets_.find(as);
-    GPR_ASSERT(it != self->sockets_.end());
+    CHECK(it != self->sockets_.end());
     return it->second->Connect(&wsa_error_ctx, target, target_len);
   }
 
@@ -732,7 +755,7 @@ class CustomSockFuncs {
     GrpcPolledFdFactoryWindows* self =
         static_cast<GrpcPolledFdFactoryWindows*>(user_data);
     auto it = self->sockets_.find(as);
-    GPR_ASSERT(it != self->sockets_.end());
+    CHECK(it != self->sockets_.end());
     return it->second->SendV(&wsa_error_ctx, iov, iovec_count);
   }
 
@@ -743,13 +766,15 @@ class CustomSockFuncs {
     GrpcPolledFdFactoryWindows* self =
         static_cast<GrpcPolledFdFactoryWindows*>(user_data);
     auto it = self->sockets_.find(as);
-    GPR_ASSERT(it != self->sockets_.end());
+    CHECK(it != self->sockets_.end());
     return it->second->RecvFrom(&wsa_error_ctx, data, data_len, flags, from,
                                 from_len);
   }
 
   static int CloseSocket(SOCKET s, void*) {
-    GRPC_ARES_RESOLVER_TRACE_LOG("c-ares socket: %d CloseSocket", s);
+    GRPC_TRACE_LOG(cares_resolver, INFO)
+        << "(EventEngine c-ares resolver) c-ares socket: " << s
+        << " CloseSocket";
     return 0;
   }
 };
@@ -802,7 +827,7 @@ void GrpcPolledFdFactoryWindows::Initialize(grpc_core::Mutex* mutex,
 std::unique_ptr<GrpcPolledFd> GrpcPolledFdFactoryWindows::NewGrpcPolledFdLocked(
     ares_socket_t as) {
   auto it = sockets_.find(as);
-  GPR_ASSERT(it != sockets_.end());
+  CHECK(it != sockets_.end());
   return std::make_unique<GrpcPolledFdWrapper>(it->second.get());
 }
 
@@ -818,7 +843,6 @@ void GrpcPolledFdFactoryWindows::ConfigureAresChannelLocked(
   ares_set_socket_functions(channel, &kCustomSockFuncs, this);
 }
 
-}  // namespace experimental
-}  // namespace grpc_event_engine
+}  // namespace grpc_event_engine::experimental
 
 #endif  // GRPC_ARES == 1 && defined(GRPC_WINDOWS_SOCKET_ARES_EV_DRIVER)

@@ -26,7 +26,7 @@ grpc_cc_library(
     ],
     hdrs = ["memstats.h"],
     external_deps = [
-        "absl/types:optional",
+        "absl/log:check",
     ],
     tags = [
         "bazel_only",
@@ -44,6 +44,8 @@ grpc_cc_binary(
     external_deps = [
         "absl/flags:flag",
         "absl/flags:parse",
+        "absl/log:check",
+        "absl/log:log",
     ],
     tags = [
         "bazel_only",
@@ -55,8 +57,9 @@ grpc_cc_binary(
         "//:gpr",
         "//:grpc",
         "//src/core:channel_args",
-        "//test/core/util:grpc_test_util",
-        "//test/core/util:grpc_test_util_base",
+        "//src/core:chaotic_good_connector",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util_base",
     ],
 )
 
@@ -66,6 +69,8 @@ grpc_cc_binary(
     external_deps = [
         "absl/flags:flag",
         "absl/flags:parse",
+        "absl/log:check",
+        "absl/log:log",
     ],
     tags = [
         "bazel_only",
@@ -77,10 +82,11 @@ grpc_cc_binary(
         "//:gpr",
         "//:grpc",
         "//src/core:channel_args",
+        "//src/core:chaotic_good_server",
         "//src/core:xds_enabled_server",
         "//test/core/end2end:ssl_test_data",
-        "//test/core/util:grpc_test_util",
-        "//test/core/util:grpc_test_util_base",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util_base",
     ],
 )
 
@@ -90,6 +96,8 @@ grpc_cc_binary(
     external_deps = [
         "absl/flags:flag",
         "absl/flags:parse",
+        "absl/log:check",
+        "absl/log:log",
         "absl/time",
     ],
     tags = [
@@ -102,10 +110,11 @@ grpc_cc_binary(
         "//:gpr",
         "//:grpc",
         "//:grpc++",
-        "//src/proto/grpc/testing:benchmark_service_proto",
+        "//:grpcpp_chaotic_good",
+        "//src/proto/grpc/testing:benchmark_service_cc_grpc",
         "//test/core/end2end:ssl_test_data",
-        "//test/core/util:grpc_test_util",
-        "//test/core/util:grpc_test_util_base",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util_base",
     ],
 )
 
@@ -114,7 +123,9 @@ grpc_cc_binary(
     srcs = ["callback_server.cc"],
     external_deps = [
         "absl/flags:flag",
+        "absl/log:log",
         "absl/flags:parse",
+        "absl/log:check",
     ],
     tags = [
         "bazel_only",
@@ -126,10 +137,11 @@ grpc_cc_binary(
         "//:gpr",
         "//:grpc",
         "//:grpc++",
-        "//src/proto/grpc/testing:benchmark_service_proto",
+        "//:grpcpp_chaotic_good",
+        "//src/proto/grpc/testing:benchmark_service_cc_grpc",
         "//test/core/end2end:ssl_test_data",
-        "//test/core/util:grpc_test_util",
-        "//test/core/util:grpc_test_util_base",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util_base",
     ],
 )
 
@@ -154,15 +166,15 @@ grpc_cc_test(
         "absl/algorithm:container",
         "absl/flags:flag",
         "absl/flags:parse",
+        "absl/log:log",
     ],
-    language = "C++",
     tags = MEMORY_USAGE_TAGS,
     deps = [
         "//:gpr",
         "//:grpc",
         "//:subprocess",
-        "//test/core/util:grpc_test_util",
-        "//test/core/util:grpc_test_util_base",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util_base",
         "//test/cpp/end2end/xds:xds_utils",
     ],
 )
@@ -176,14 +188,13 @@ grpc_cc_binary(
         "absl/flags:flag",
         "absl/flags:parse",
     ],
-    language = "C++",
     tags = MEMORY_USAGE_TAGS,
     deps = [
         "//:gpr",
         "//:grpc",
         "//:subprocess",
-        "//test/core/util:grpc_test_util",
-        "//test/core/util:grpc_test_util_base",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util_base",
         "//test/cpp/end2end/xds:xds_utils",
     ],
 )

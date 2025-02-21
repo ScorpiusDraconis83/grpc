@@ -27,11 +27,12 @@
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "google/protobuf/struct.upb.h"
 #include "opentelemetry/sdk/common/attribute_utils.h"
-
 #include "src/core/lib/slice/slice.h"
 #include "src/core/lib/transport/metadata_batch.h"
 #include "src/cpp/ext/otel/otel_plugin.h"
+#include "upb/mem/arena.hpp"
 
 namespace grpc {
 namespace internal {
@@ -53,8 +54,7 @@ class ServiceMeshLabelsInjector : public LabelsInjector {
   // Add optional labels to the traced calls.
   bool AddOptionalLabels(
       bool is_client,
-      absl::Span<const std::shared_ptr<std::map<std::string, std::string>>>
-          optional_labels_span,
+      absl::Span<const grpc_core::RefCountedStringValue> optional_labels,
       opentelemetry::nostd::function_ref<
           bool(opentelemetry::nostd::string_view,
                opentelemetry::common::AttributeValue)>
@@ -63,18 +63,54 @@ class ServiceMeshLabelsInjector : public LabelsInjector {
   // Gets the size of the actual optional labels.
   size_t GetOptionalLabelsSize(
       bool is_client,
-      absl::Span<const std::shared_ptr<std::map<std::string, std::string>>>
-          optional_labels_span) const override;
+      absl::Span<const grpc_core::RefCountedStringValue> /*optional_labels*/)
+      const override {
+    return is_client ? 2 : 0;
+  }
+
+  const std::vector<std::pair<absl::string_view, std::string>>&
+  TestOnlyLocalLabels() const {
+    return local_labels_;
+  }
+
+  const grpc_core::Slice& TestOnlySerializedLabels() const {
+    return serialized_labels_to_send_;
+  }
 
  private:
   std::vector<std::pair<absl::string_view, std::string>> local_labels_;
   grpc_core::Slice serialized_labels_to_send_;
 };
 
-// Returns the mesh ID by reading and parsing the bootstrap file. Returns
-// "unknown" if for some reason, mesh ID could not be figured out.
-// EXPOSED FOR TESTING PURPOSES ONLY.
-std::string GetMeshId();
+// A LabelsIterable class provided by ServiceMeshLabelsInjector. EXPOSED FOR
+// TESTING PURPOSES ONLY.
+class MeshLabelsIterable : public LabelsIterable {
+ public:
+  enum class GcpResourceType : std::uint8_t { kGke, kGce, kUnknown };
+
+  MeshLabelsIterable(
+      const std::vector<std::pair<absl::string_view, std::string>>&
+          local_labels,
+      grpc_core::Slice remote_metadata);
+
+  std::optional<std::pair<absl::string_view, absl::string_view>> Next()
+      override;
+
+  size_t Size() const override;
+
+  void ResetIteratorPosition() override { pos_ = 0; }
+
+  // Returns true if the peer sent a non-empty base64 encoded
+  // "x-envoy-peer-metadata" metadata.
+  bool GotRemoteLabels() const { return struct_pb_ != nullptr; }
+
+ private:
+  upb::Arena arena_;
+  google_protobuf_Struct* struct_pb_ = nullptr;
+  const std::vector<std::pair<absl::string_view, std::string>>& local_labels_;
+  GcpResourceType remote_type_ = GcpResourceType::kUnknown;
+  uint32_t pos_ = 0;
+};
 
 }  // namespace internal
 }  // namespace grpc

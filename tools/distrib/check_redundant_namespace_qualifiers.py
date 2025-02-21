@@ -21,14 +21,34 @@ import os
 import re
 import sys
 
+IGNORED_FILES = [
+    # note: the grpc_core::Server redundant namespace qualification is required
+    # for older gcc versions.
+    "src/core/ext/transport/chttp2/server/chttp2_server.h",
+    "src/core/server/server.h",
+    # generated code adds a necessary grpc_core:: for a logging macro which can
+    # be used anywhere.
+    "src/core/lib/debug/trace_impl.h",
+]
+
 
 def find_closing_mustache(contents, initial_depth):
     """Find the closing mustache for a given number of open mustaches."""
     depth = initial_depth
     start_len = len(contents)
     while contents:
+        # Skip over raw strings.
+        if contents.startswith('R"'):
+            contents = contents[2:]
+            offset = contents.find("(")
+            assert offset != -1
+            prefix = contents[:offset]
+            contents = contents[offset:]
+            offset = contents.find(f'){prefix}"')
+            assert offset != -1
+            contents = contents[offset + len(prefix) + 2 :]
         # Skip over strings.
-        if contents[0] == '"':
+        elif contents[0] == '"':
             contents = contents[1:]
             while contents[0] != '"':
                 if contents.startswith("\\\\"):
@@ -129,6 +149,9 @@ namespace foo {
     foo::a;
     ::foo::a;
 }
+{R"foo({
+foo::a;
+}foo)"}
 """
 _TEST_EXPECTED = """
 namespace bar {
@@ -140,6 +163,9 @@ namespace foo {
     a;
     ::foo::a;
 }
+{R"foo({
+foo::a;
+}foo)"}
 """
 output = update_file(_TEST, ["foo"])
 if output != _TEST_EXPECTED:
@@ -166,12 +192,18 @@ for config in _CONFIGURATION:
             for file in files:
                 if file.endswith(".cc") or file.endswith(".h"):
                     path = os.path.join(root, file)
+                    if path in IGNORED_FILES:
+                        continue
                     try:
                         with open(path) as f:
                             contents = f.read()
                     except IOError:
                         continue
-                    updated = update_file(contents, config.namespaces)
+                    try:
+                        updated = update_file(contents, config.namespaces)
+                    except:
+                        print(f"error checking {file}")
+                        raise
                     if updated != contents:
                         changed.append(path)
                         with open(os.path.join(root, file), "w") as f:

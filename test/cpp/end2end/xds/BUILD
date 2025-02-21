@@ -25,19 +25,24 @@ grpc_cc_library(
     name = "xds_server",
     srcs = ["xds_server.cc"],
     hdrs = ["xds_server.h"],
+    external_deps = [
+        "absl/log:check",
+        "absl/log:log",
+    ],
+    visibility = ["@grpc:xds_end2end_test_utils"],
     deps = [
         "//:gpr",
         "//:grpc",
         "//:grpc++",
-        "//src/proto/grpc/testing/xds/v3:ads_proto",
-        "//src/proto/grpc/testing/xds/v3:cluster_proto",
-        "//src/proto/grpc/testing/xds/v3:discovery_proto",
-        "//src/proto/grpc/testing/xds/v3:endpoint_proto",
-        "//src/proto/grpc/testing/xds/v3:listener_proto",
-        "//src/proto/grpc/testing/xds/v3:lrs_proto",
-        "//src/proto/grpc/testing/xds/v3:route_proto",
-        "//test/core/util:grpc_test_util",
+        "//src/proto/grpc/testing/xds/v3:ads_cc_grpc",
+        "//src/proto/grpc/testing/xds/v3:discovery_cc_proto",
+        "//src/proto/grpc/testing/xds/v3:lrs_cc_grpc",
+        "//test/core/test_util:grpc_test_util",
         "//test/cpp/end2end:counted_service",
+        "@envoy_api//envoy/config/cluster/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/endpoint/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/listener/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/route/v3:pkg_cc_proto",
     ],
 )
 
@@ -45,16 +50,17 @@ grpc_cc_library(
     name = "xds_utils",
     srcs = ["xds_utils.cc"],
     hdrs = ["xds_utils.h"],
+    visibility = ["@grpc:xds_end2end_test_utils"],
     deps = [
         ":xds_server",
-        "//src/proto/grpc/testing/xds/v3:cluster_proto",
-        "//src/proto/grpc/testing/xds/v3:discovery_proto",
-        "//src/proto/grpc/testing/xds/v3:endpoint_proto",
-        "//src/proto/grpc/testing/xds/v3:http_connection_manager_proto",
-        "//src/proto/grpc/testing/xds/v3:listener_proto",
-        "//src/proto/grpc/testing/xds/v3:route_proto",
-        "//src/proto/grpc/testing/xds/v3:router_proto",
-        "//test/core/util:grpc_test_util_base",
+        "//src/proto/grpc/testing/xds/v3:discovery_cc_proto",
+        "//test/core/test_util:grpc_test_util_base",
+        "@envoy_api//envoy/config/cluster/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/endpoint/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/listener/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/route/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/router/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/network/http_connection_manager/v3:pkg_cc_proto",
     ],
 )
 
@@ -64,6 +70,7 @@ grpc_cc_library(
     srcs = ["xds_end2end_test_lib.cc"],
     hdrs = ["xds_end2end_test_lib.h"],
     external_deps = [
+        "absl/log:check",
         "gtest",
     ],
     deps = [
@@ -73,30 +80,31 @@ grpc_cc_library(
         "//:grpc",
         "//:grpc++",
         "//:grpc_resolver_fake",
-        "//src/proto/grpc/testing:echo_messages_proto",
-        "//src/proto/grpc/testing:echo_proto",
-        "//src/proto/grpc/testing/duplicate:echo_duplicate_proto",
-        "//src/proto/grpc/testing/xds/v3:ads_proto",
-        "//src/proto/grpc/testing/xds/v3:cluster_proto",
-        "//src/proto/grpc/testing/xds/v3:discovery_proto",
-        "//src/proto/grpc/testing/xds/v3:endpoint_proto",
-        "//src/proto/grpc/testing/xds/v3:http_connection_manager_proto",
-        "//src/proto/grpc/testing/xds/v3:http_filter_rbac_proto",
-        "//src/proto/grpc/testing/xds/v3:listener_proto",
-        "//src/proto/grpc/testing/xds/v3:lrs_proto",
-        "//src/proto/grpc/testing/xds/v3:route_proto",
-        "//src/proto/grpc/testing/xds/v3:router_proto",
-        "//test/core/util:grpc_test_util",
+        "//src/proto/grpc/testing:echo_cc_grpc",
+        "//src/proto/grpc/testing:echo_messages_cc_proto",
+        "//src/proto/grpc/testing/duplicate:echo_duplicate_cc_grpc",
+        "//src/proto/grpc/testing/xds/v3:ads_cc_grpc",
+        "//src/proto/grpc/testing/xds/v3:discovery_cc_proto",
+        "//src/proto/grpc/testing/xds/v3:lrs_cc_grpc",
+        "//test/core/test_util:grpc_test_util",
         "//test/cpp/end2end:counted_service",
         "//test/cpp/end2end:test_service_impl",
         "//test/cpp/util:tls_test_utils",
+        "@com_github_cncf_xds//xds/data/orca/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/cluster/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/endpoint/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/listener/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/route/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/rbac/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/router/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/network/http_connection_manager/v3:pkg_cc_proto",
     ],
 )
 
 grpc_cc_test(
-    name = "xds_end2end_test",
+    name = "xds_security_end2end_test",
     size = "large",
-    srcs = ["xds_end2end_test.cc"],
+    srcs = ["xds_security_end2end_test.cc"],
     data = [
         "//src/core/tsi/test_creds:badclient.key",
         "//src/core/tsi/test_creds:badclient.pem",
@@ -107,11 +115,12 @@ grpc_cc_test(
         "//src/core/tsi/test_creds:server1.pem",
     ],
     external_deps = [
+        "absl/log:check",
         "gtest",
     ],
     flaky = True,  # TODO(b/144705388)
     linkstatic = True,  # Fixes dyld error on MacOS
-    shard_count = 50,
+    shard_count = 25,
     tags = [
         "no_test_ios",
         "no_windows",
@@ -122,30 +131,25 @@ grpc_cc_test(
         "//:gpr",
         "//:grpc",
         "//:grpc++",
-        "//:grpc_resolver_fake",
-        "//src/core:channel_args",
         "//src/core:grpc_audit_logging",
-        "//src/proto/grpc/testing:echo_messages_proto",
-        "//src/proto/grpc/testing:echo_proto",
-        "//src/proto/grpc/testing/duplicate:echo_duplicate_proto",
-        "//src/proto/grpc/testing/xds/v3:aggregate_cluster_proto",
-        "//src/proto/grpc/testing/xds/v3:cluster_proto",
-        "//src/proto/grpc/testing/xds/v3:endpoint_proto",
-        "//src/proto/grpc/testing/xds/v3:fault_common_proto",
-        "//src/proto/grpc/testing/xds/v3:fault_proto",
-        "//src/proto/grpc/testing/xds/v3:http_connection_manager_proto",
-        "//src/proto/grpc/testing/xds/v3:http_filter_rbac_proto",
-        "//src/proto/grpc/testing/xds/v3:listener_proto",
-        "//src/proto/grpc/testing/xds/v3:route_proto",
-        "//src/proto/grpc/testing/xds/v3:router_proto",
-        "//src/proto/grpc/testing/xds/v3:tls_proto",
-        "//src/proto/grpc/testing/xds/v3:typed_struct_proto",
-        "//test/core/util:audit_logging_utils",
-        "//test/core/util:grpc_test_util",
-        "//test/core/util:scoped_env_var",
+        "//src/proto/grpc/testing:echo_cc_grpc",
+        "//src/proto/grpc/testing:echo_messages_cc_proto",
+        "//test/core/test_util:audit_logging_utils",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:scoped_env_var",
         "//test/cpp/util:test_config",
         "//test/cpp/util:test_util",
         "//test/cpp/util:tls_test_utils",
+        "@envoy_api//envoy/config/cluster/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/endpoint/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/listener/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/route/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/clusters/aggregate/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/rbac/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/router/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/network/http_connection_manager/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/transport_sockets/tls/v3:pkg_cc_proto",
+        "@envoy_api//envoy/type/v3:pkg_cc_proto",
     ],
 )
 
@@ -169,9 +173,9 @@ grpc_cc_test(
         "//:gpr",
         "//:grpc",
         "//:grpc++",
-        "//test/core/util:fake_stats_plugin",
-        "//test/core/util:grpc_test_util",
-        "//test/core/util:scoped_env_var",
+        "//test/core/test_util:fake_stats_plugin",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:scoped_env_var",
         "//test/cpp/end2end:connection_attempt_injector",
     ],
 )
@@ -181,6 +185,7 @@ grpc_cc_test(
     size = "large",
     srcs = ["xds_cluster_type_end2end_test.cc"],
     external_deps = [
+        "absl/log:check",
         "gtest",
     ],
     flaky = True,  # TODO(b/144705388)
@@ -196,10 +201,10 @@ grpc_cc_test(
         "//:grpc",
         "//:grpc++",
         "//:grpc_resolver_fake",
-        "//src/proto/grpc/testing/xds/v3:aggregate_cluster_proto",
-        "//test/core/util:grpc_test_util",
-        "//test/core/util:scoped_env_var",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:scoped_env_var",
         "//test/cpp/end2end:connection_attempt_injector",
+        "@envoy_api//envoy/extensions/clusters/aggregate/v3:pkg_cc_proto",
     ],
 )
 
@@ -207,6 +212,11 @@ grpc_cc_test(
     name = "xds_core_end2end_test",
     size = "large",
     srcs = ["xds_core_end2end_test.cc"],
+    data = [
+        "//src/core/tsi/test_creds:ca.pem",
+        "//src/core/tsi/test_creds:server1.key",
+        "//src/core/tsi/test_creds:server1.pem",
+    ],
     external_deps = [
         "gtest",
     ],
@@ -223,8 +233,9 @@ grpc_cc_test(
         "//:gpr",
         "//:grpc",
         "//:grpc++",
-        "//test/core/util:grpc_test_util",
-        "//test/core/util:scoped_env_var",
+        "//test/core/test_util:fake_stats_plugin",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:scoped_env_var",
     ],
 )
 
@@ -247,11 +258,11 @@ grpc_cc_test(
         "//:grpc",
         "//:grpc++",
         "//:grpcpp_csds",
-        "//src/proto/grpc/testing/xds/v3:cluster_proto",
-        "//src/proto/grpc/testing/xds/v3:endpoint_proto",
-        "//src/proto/grpc/testing/xds/v3:listener_proto",
-        "//src/proto/grpc/testing/xds/v3:route_proto",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
+        "@envoy_api//envoy/config/cluster/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/endpoint/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/listener/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/route/v3:pkg_cc_proto",
     ],
 )
 
@@ -266,6 +277,7 @@ grpc_cc_test(
     linkstatic = True,  # Fixes dyld error on MacOS
     shard_count = 5,
     tags = [
+        "no_mac",
         "no_test_ios",
         "no_windows",
         "xds_end2end_test",
@@ -275,18 +287,27 @@ grpc_cc_test(
         "//:gpr",
         "//:grpc",
         "//:grpc++",
-        "//src/proto/grpc/testing/xds/v3:cluster_proto",
-        "//src/proto/grpc/testing/xds/v3:fault_proto",
-        "//src/proto/grpc/testing/xds/v3:http_connection_manager_proto",
-        "//src/proto/grpc/testing/xds/v3:router_proto",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
+        "@envoy_api//envoy/config/cluster/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/fault/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/router/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/network/http_connection_manager/v3:pkg_cc_proto",
     ],
 )
 
 grpc_cc_test(
-    name = "xds_outlier_detection_end2end_test",
+    name = "xds_gcp_authn_end2end_test",
     size = "large",
-    srcs = ["xds_outlier_detection_end2end_test.cc"],
+    srcs = ["xds_gcp_authn_end2end_test.cc"],
+    data = [
+        "//src/core/tsi/test_creds:badclient.key",
+        "//src/core/tsi/test_creds:badclient.pem",
+        "//src/core/tsi/test_creds:ca.pem",
+        "//src/core/tsi/test_creds:client.key",
+        "//src/core/tsi/test_creds:client.pem",
+        "//src/core/tsi/test_creds:server1.key",
+        "//src/core/tsi/test_creds:server1.pem",
+    ],
     external_deps = [
         "gtest",
     ],
@@ -302,9 +323,38 @@ grpc_cc_test(
         "//:gpr",
         "//:grpc",
         "//:grpc++",
-        "//src/proto/grpc/testing/xds/v3:fault_proto",
-        "//src/proto/grpc/testing/xds/v3:router_proto",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:scoped_env_var",
+        "@envoy_api//envoy/config/cluster/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/gcp_authn/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/router/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/network/http_connection_manager/v3:pkg_cc_proto",
+    ],
+)
+
+grpc_cc_test(
+    name = "xds_outlier_detection_end2end_test",
+    size = "large",
+    srcs = ["xds_outlier_detection_end2end_test.cc"],
+    external_deps = [
+        "absl/log:check",
+        "gtest",
+    ],
+    flaky = True,
+    linkstatic = True,  # Fixes dyld error on MacOS
+    tags = [
+        "no_test_ios",
+        "no_windows",
+        "xds_end2end_test",
+    ],  # TODO(jtattermusch): fix test on windows
+    deps = [
+        ":xds_end2end_test_lib",
+        "//:gpr",
+        "//:grpc",
+        "//:grpc++",
+        "//test/core/test_util:grpc_test_util",
+        "@envoy_api//envoy/extensions/filters/http/fault/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/router/v3:pkg_cc_proto",
     ],
 )
 
@@ -326,11 +376,12 @@ grpc_cc_test(
         "//:gpr",
         "//:grpc",
         "//:grpc++",
-        "//src/proto/grpc/testing/xds/v3:client_side_weighted_round_robin_proto",
-        "//src/proto/grpc/testing/xds/v3:cluster_proto",
-        "//src/proto/grpc/testing/xds/v3:wrr_locality_proto",
-        "//test/core/util:grpc_test_util",
-        "//test/core/util:scoped_env_var",
+        "//test/core/test_util:fake_stats_plugin",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:scoped_env_var",
+        "@envoy_api//envoy/config/cluster/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/load_balancing_policies/client_side_weighted_round_robin/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/load_balancing_policies/wrr_locality/v3:pkg_cc_proto",
     ],
 )
 
@@ -339,6 +390,8 @@ grpc_cc_test(
     size = "large",
     srcs = ["xds_ring_hash_end2end_test.cc"],
     external_deps = [
+        "absl/log:check",
+        "absl/log:log",
         "gtest",
     ],
     flaky = True,  # TODO(b/144705388)
@@ -355,13 +408,14 @@ grpc_cc_test(
         "//:grpc",
         "//:grpc++",
         "//:grpc_resolver_fake",
-        "//src/proto/grpc/testing/xds/v3:aggregate_cluster_proto",
-        "//src/proto/grpc/testing/xds/v3:cluster_proto",
-        "//src/proto/grpc/testing/xds/v3:endpoint_proto",
-        "//src/proto/grpc/testing/xds/v3:listener_proto",
-        "//src/proto/grpc/testing/xds/v3:route_proto",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:scoped_env_var",
         "//test/cpp/end2end:connection_attempt_injector",
+        "@envoy_api//envoy/config/cluster/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/endpoint/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/listener/v3:pkg_cc_proto",
+        "@envoy_api//envoy/config/route/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/clusters/aggregate/v3:pkg_cc_proto",
     ],
 )
 
@@ -383,10 +437,10 @@ grpc_cc_test(
         "//:gpr",
         "//:grpc",
         "//:grpc++",
-        "//src/proto/grpc/lookup/v1:rls_config_proto",
-        "//src/proto/grpc/lookup/v1:rls_proto",
-        "//test/core/util:grpc_test_util",
-        "//test/core/util:scoped_env_var",
+        "//src/proto/grpc/lookup/v1:rls_cc_proto",
+        "//src/proto/grpc/lookup/v1:rls_config_cc_proto",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:scoped_env_var",
         "//test/cpp/end2end:rls_server",
     ],
 )
@@ -411,9 +465,10 @@ grpc_cc_test(
         "//:gpr",
         "//:grpc",
         "//:grpc++",
-        "//src/proto/grpc/testing/xds/v3:fault_proto",
-        "//src/proto/grpc/testing/xds/v3:router_proto",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:scoped_env_var",
+        "@envoy_api//envoy/extensions/filters/http/fault/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/router/v3:pkg_cc_proto",
     ],
 )
 
@@ -431,9 +486,9 @@ grpc_cc_test(
         "//:gpr",
         "//:grpc",
         "//:grpc++",
-        "//src/proto/grpc/testing:echo_messages_proto",
-        "//src/proto/grpc/testing:echo_proto",
-        "//test/core/util:grpc_test_util",
+        "//src/proto/grpc/testing:echo_cc_grpc",
+        "//src/proto/grpc/testing:echo_messages_cc_proto",
+        "//test/core/test_util:grpc_test_util",
         "//test/cpp/end2end:test_service_impl",
         "//test/cpp/util:test_util",
     ],
@@ -457,10 +512,10 @@ grpc_cc_test(
         "//:gpr",
         "//:grpc",
         "//:grpc++",
-        "//src/proto/grpc/testing/xds/v3:stateful_session_cookie_proto",
-        "//src/proto/grpc/testing/xds/v3:stateful_session_proto",
-        "//test/core/util:grpc_test_util",
-        "//test/core/util:scoped_env_var",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:scoped_env_var",
+        "@envoy_api//envoy/extensions/filters/http/stateful_session/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/http/stateful_session/cookie/v3:pkg_cc_proto",
     ],
 )
 
@@ -482,11 +537,80 @@ grpc_cc_test(
         "//:gpr",
         "//:grpc",
         "//:grpc++",
-        "//src/proto/grpc/testing/xds/v3:aggregate_cluster_proto",
-        "//src/proto/grpc/testing/xds/v3:pick_first_proto",
-        "//src/proto/grpc/testing/xds/v3:router_proto",
-        "//test/core/util:grpc_test_util",
-        "//test/core/util:scoped_env_var",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:scoped_env_var",
         "//test/cpp/end2end:connection_attempt_injector",
+        "@envoy_api//envoy/extensions/clusters/aggregate/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/filters/http/router/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/load_balancing_policies/pick_first/v3:pkg_cc_proto",
+    ],
+)
+
+grpc_cc_test(
+    name = "xds_fallback_end2end_test",
+    srcs = ["xds_fallback_end2end_test.cc"],
+    external_deps = [
+        "gtest",
+    ],
+    linkstatic = True,  # Fixes dyld error on MacOS
+    tags = [
+        "no_test_ios",
+        "no_windows",
+        "xds_end2end_test",
+    ],  # TODO(jtattermusch): fix test on windows
+    deps = [
+        ":xds_end2end_test_lib",
+        "//:gpr",
+        "//:grpc",
+        "//:grpc++",
+        "//test/core/test_util:scoped_env_var",
+    ],
+)
+
+grpc_cc_test(
+    name = "xds_http_connect_end2end_test",
+    srcs = ["xds_http_connect_end2end_test.cc"],
+    external_deps = [
+        "gtest",
+    ],
+    linkstatic = True,  # Fixes dyld error on MacOS
+    tags = [
+        "no_test_ios",
+        "no_windows",
+        "xds_end2end_test",
+    ],  # TODO(jtattermusch): fix test on windows
+    deps = [
+        ":xds_end2end_test_lib",
+        "//:gpr",
+        "//:grpc",
+        "//:grpc++",
+        "//test/core/end2end:http_proxy",
+        "//test/core/test_util:scoped_env_var",
+        "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
+        "@envoy_api//envoy/extensions/transport_sockets/http_11_proxy/v3:pkg_cc_proto",
+    ],
+)
+
+grpc_cc_test(
+    name = "xds_enabled_server_end2end_test",
+    size = "large",
+    srcs = ["xds_enabled_server_end2end_test.cc"],
+    external_deps = [
+        "gtest",
+    ],
+    flaky = True,  # TODO(b/144705388)
+    linkstatic = True,  # Fixes dyld error on MacOS
+    tags = [
+        "no_test_ios",
+        "no_windows",
+        "xds_end2end_test",
+    ],  # TODO(jtattermusch): fix test on windows
+    deps = [
+        ":xds_end2end_test_lib",
+        "//:gpr",
+        "//:grpc",
+        "//:grpc++",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:scoped_env_var",
     ],
 )

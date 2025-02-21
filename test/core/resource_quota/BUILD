@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("//bazel:grpc_build_system.bzl", "grpc_cc_library", "grpc_cc_test", "grpc_package")
-load("//test/core/util:grpc_fuzzer.bzl", "grpc_proto_fuzzer")
+load("//bazel:grpc_build_system.bzl", "grpc_cc_library", "grpc_cc_proto_library", "grpc_cc_test", "grpc_internal_proto_library", "grpc_package")
+load("//test/core/test_util:grpc_fuzzer.bzl", "grpc_fuzz_test")
 
 licenses(["notice"])
 
@@ -26,7 +26,6 @@ grpc_cc_test(
         "absl/strings",
         "gtest",
     ],
-    language = "C++",
     tags = [
         "resource_quota_test",
     ],
@@ -38,7 +37,7 @@ grpc_cc_test(
         "//:ref_counted_ptr",
         "//src/core:arena",
         "//src/core:resource_quota",
-        "//test/core/util:grpc_test_util_unsecure",
+        "//test/core/test_util:grpc_test_util_unsecure",
     ],
 )
 
@@ -46,7 +45,7 @@ grpc_cc_library(
     name = "call_checker",
     testonly = True,
     hdrs = ["call_checker.h"],
-    language = "c++",
+    external_deps = ["absl/log:check"],
     deps = ["//:gpr"],
 )
 
@@ -54,7 +53,6 @@ grpc_cc_test(
     name = "memory_quota_test",
     srcs = ["memory_quota_test.cc"],
     external_deps = ["gtest"],
-    language = "c++",
     tags = [
         "cpu:10",
         "resource_quota_test",
@@ -66,7 +64,7 @@ grpc_cc_test(
         "//:exec_ctx",
         "//src/core:memory_quota",
         "//src/core:slice_refcount",
-        "//test/core/util:grpc_test_util_unsecure",
+        "//test/core/test_util:grpc_test_util_unsecure",
     ],
 )
 
@@ -75,7 +73,6 @@ grpc_cc_test(
     srcs = ["periodic_update_test.cc"],
     external_deps = ["gtest"],
     flaky = True,
-    language = "c++",
     uses_event_engine = False,
     uses_polling = False,
     deps = [
@@ -89,7 +86,6 @@ grpc_cc_test(
     name = "thread_quota_test",
     srcs = ["thread_quota_test.cc"],
     external_deps = ["gtest"],
-    language = "c++",
     uses_event_engine = False,
     uses_polling = False,
     deps = ["//src/core:thread_quota"],
@@ -99,7 +95,6 @@ grpc_cc_test(
     name = "resource_quota_test",
     srcs = ["resource_quota_test.cc"],
     external_deps = ["gtest"],
-    language = "c++",
     tags = [
         "resource_quota_test",
     ],
@@ -107,7 +102,7 @@ grpc_cc_test(
     uses_polling = False,
     deps = [
         "//src/core:resource_quota",
-        "//test/core/util:grpc_test_util_unsecure",
+        "//test/core/test_util:grpc_test_util_unsecure",
     ],
 )
 
@@ -116,11 +111,10 @@ grpc_cc_test(
     srcs = ["memory_quota_stress_test.cc"],
     external_deps = [
         "absl/base:core_headers",
+        "absl/log:log",
         "absl/strings",
-        "absl/types:optional",
         "gtest",
     ],
-    language = "c++",
     # We only run this test under Linux, and really only care about the
     # TSAN results.
     tags = [
@@ -135,27 +129,34 @@ grpc_cc_test(
         "//:gpr",
         "//src/core:event_engine_memory_allocator",
         "//src/core:memory_quota",
-        "//test/core/util:grpc_test_util_unsecure",
+        "//test/core/test_util:grpc_test_util_unsecure",
     ],
 )
 
-grpc_proto_fuzzer(
+grpc_internal_proto_library(
+    name = "memory_quota_fuzzer_proto",
+    srcs = ["memory_quota_fuzzer.proto"],
+    deps = ["//test/core/test_util:fuzz_config_vars_proto"],
+)
+
+grpc_cc_proto_library(
+    name = "memory_quota_fuzzer_cc_proto",
+    deps = ["memory_quota_fuzzer_proto"],
+)
+
+grpc_fuzz_test(
     name = "memory_quota_fuzzer",
     srcs = ["memory_quota_fuzzer.cc"],
-    corpus = "memory_quota_fuzzer_corpus",
     external_deps = [
         "absl/status",
         "absl/strings",
-        "absl/types:optional",
+        "gtest",
+        "fuzztest",
+        "fuzztest_main",
     ],
-    language = "C++",
-    proto = "memory_quota_fuzzer.proto",
-    proto_deps = ["//test/core/util:fuzz_config_vars_proto"],
-    tags = ["no_windows"],
-    uses_event_engine = False,
-    uses_polling = False,
     deps = [
         "call_checker",
+        "memory_quota_fuzzer_cc_proto",
         "//:debug_location",
         "//:exec_ctx",
         "//:gpr",
@@ -166,6 +167,22 @@ grpc_proto_fuzzer(
         "//src/core:experiments",
         "//src/core:memory_quota",
         "//src/core:useful",
-        "//test/core/util:fuzz_config_vars",
+        "//test/core/test_util:fuzz_config_vars",
+        "//test/core/test_util:fuzz_config_vars_helpers",
+        "//test/core/test_util:grpc_test_util",
+    ],
+)
+
+grpc_fuzz_test(
+    name = "arena_fuzztest",
+    srcs = ["arena_fuzztest.cc"],
+    external_deps = [
+        "fuzztest",
+        "fuzztest_main",
+        "gtest",
+    ],
+    deps = [
+        "//src/core:arena",
+        "//src/core:match",
     ],
 )

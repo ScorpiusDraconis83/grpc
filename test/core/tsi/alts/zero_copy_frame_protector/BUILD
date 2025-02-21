@@ -25,14 +25,13 @@ grpc_cc_test(
         "gtest",
         "absl/types:span",
     ],
-    language = "C++",
     deps = [
         "//:gpr",
         "//:grpc",
         "//:grpc_base",
         "//src/core:slice",
+        "//test/core/test_util:grpc_test_util",
         "//test/core/tsi/alts/crypt:alts_crypt_test_util",
-        "//test/core/util:grpc_test_util",
     ],
 )
 
@@ -43,12 +42,11 @@ grpc_cc_test(
         "gtest",
         "absl/types:span",
     ],
-    language = "C++",
     deps = [
         "//:gpr",
         "//:grpc",
+        "//test/core/test_util:grpc_test_util",
         "//test/core/tsi/alts/crypt:alts_crypt_test_util",
-        "//test/core/util:grpc_test_util",
     ],
 )
 
@@ -59,13 +57,12 @@ grpc_cc_test(
         "gtest",
         "absl/types:span",
     ],
-    language = "C++",
     deps = [
         "//:gpr",
         "//:grpc",
         "//:grpc_base",
         "//src/core:slice",
+        "//test/core/test_util:grpc_test_util",
         "//test/core/tsi/alts/crypt:alts_crypt_test_util",
-        "//test/core/util:grpc_test_util",
     ],
 )

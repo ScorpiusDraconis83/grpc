@@ -14,21 +14,19 @@
 // limitations under the License.
 //
 
-#include <thread>
-
 #include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
-#include "absl/strings/str_format.h"
-
 #include <grpc/grpc.h>
 #include <grpcpp/grpcpp.h>
+#include <gtest/gtest.h>
 
-#include "src/core/lib/gprpp/sync.h"
+#include <thread>
+
+#include "absl/strings/str_format.h"
+#include "src/core/util/sync.h"
 #include "src/proto/grpc/testing/empty.pb.h"
 #include "src/proto/grpc/testing/test.grpc.pb.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/interop/xds_interop_server_lib.h"
 
 namespace grpc {
@@ -37,9 +35,8 @@ namespace {
 
 void ServerLoop(int port, grpc_core::Mutex* mutex,
                 grpc_core::CondVar* condition, Server** server) {
-  RunServer(false, /*enable_csm_observability=*/false, port,
-            /* should not be used */ -1, "127.0.0.1", "test_server",
-            [&](Server* s) {
+  RunServer(false, port, /* should not be used */ -1, "127.0.0.1",
+            "test_server", [&](Server* s) {
               grpc_core::MutexLock lock(mutex);
               *server = s;
               condition->Signal();

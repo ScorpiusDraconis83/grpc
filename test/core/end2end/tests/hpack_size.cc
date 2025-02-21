@@ -16,6 +16,8 @@
 //
 //
 
+#include <grpc/impl/channel_arg_names.h>
+#include <grpc/status.h>
 #include <stdio.h>
 
 #include <utility>
@@ -24,12 +26,8 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "gtest/gtest.h"
-
-#include <grpc/impl/channel_arg_names.h>
-#include <grpc/status.h>
-
 #include "src/core/lib/channel/channel_args.h"
-#include "src/core/lib/gprpp/no_destruct.h"
+#include "src/core/util/no_destruct.h"
 #include "test/core/end2end/end2end_tests.h"
 
 namespace grpc_core {
@@ -97,8 +95,8 @@ void SimpleRequestBody(CoreEnd2endTest& test, size_t index) {
   auto method =
       absl::StrCat("/", hobbit.first, ".", hobbit.second, "/", dragon);
   auto c = test.NewClientCall(method).Create();
-  CoreEnd2endTest::IncomingStatusOnClient server_status;
-  CoreEnd2endTest::IncomingMetadata server_initial_metadata;
+  IncomingStatusOnClient server_status;
+  IncomingMetadata server_initial_metadata;
   c.NewBatch(1)
       .SendInitialMetadata({
           {"hobbit-first-name", (*hobbits)[index % hobbits->size()].first},
@@ -111,7 +109,7 @@ void SimpleRequestBody(CoreEnd2endTest& test, size_t index) {
   auto s = test.RequestCall(101);
   test.Expect(101, true);
   test.Step();
-  CoreEnd2endTest::IncomingCloseOnServer client_close;
+  IncomingCloseOnServer client_close;
   s.NewBatch(102)
       .SendInitialMetadata({})
       .SendStatusFromServer(GRPC_STATUS_UNIMPLEMENTED, dragon, {})
@@ -138,112 +136,112 @@ void HpackSize(CoreEnd2endTest& test, int encode_size, int decode_size) {
   }
 }
 
-CORE_END2END_TEST(Http2SingleHopTest, Encode0Decode0) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode0Decode0) {
   HpackSize(*this, 0, 0);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode0Decode100) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode0Decode100) {
   HpackSize(*this, 0, 100);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode0Decode1000) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode0Decode1000) {
   HpackSize(*this, 0, 1000);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode0Decode4096) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode0Decode4096) {
   HpackSize(*this, 0, 4096);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode0Decode32768) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode0Decode32768) {
   HpackSize(*this, 0, 32768);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode0Decode4194304) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode0Decode4194304) {
   HpackSize(*this, 0, 4194304);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode100Decode0) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode100Decode0) {
   HpackSize(*this, 100, 0);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode100Decode100) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode100Decode100) {
   HpackSize(*this, 100, 100);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode100Decode1000) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode100Decode1000) {
   HpackSize(*this, 100, 1000);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode100Decode4096) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode100Decode4096) {
   HpackSize(*this, 100, 4096);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode100Decode32768) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode100Decode32768) {
   HpackSize(*this, 100, 32768);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode100Decode4194304) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode100Decode4194304) {
   HpackSize(*this, 100, 4194304);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode1000Decode0) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode1000Decode0) {
   HpackSize(*this, 1000, 0);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode1000Decode100) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode1000Decode100) {
   HpackSize(*this, 1000, 100);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode1000Decode1000) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode1000Decode1000) {
   HpackSize(*this, 1000, 1000);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode1000Decode4096) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode1000Decode4096) {
   HpackSize(*this, 1000, 4096);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode1000Decode32768) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode1000Decode32768) {
   HpackSize(*this, 1000, 32768);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode1000Decode4194304) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode1000Decode4194304) {
   HpackSize(*this, 1000, 4194304);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode4096Decode0) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode4096Decode0) {
   HpackSize(*this, 4096, 0);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode4096Decode100) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode4096Decode100) {
   HpackSize(*this, 4096, 100);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode4096Decode1000) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode4096Decode1000) {
   HpackSize(*this, 4096, 1000);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode4096Decode4096) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode4096Decode4096) {
   HpackSize(*this, 4096, 4096);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode4096Decode32768) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode4096Decode32768) {
   HpackSize(*this, 4096, 32768);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode4096Decode4194304) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode4096Decode4194304) {
   HpackSize(*this, 4096, 4194304);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode32768Decode0) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode32768Decode0) {
   HpackSize(*this, 32768, 0);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode32768Decode100) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode32768Decode100) {
   HpackSize(*this, 32768, 100);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode32768Decode1000) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode32768Decode1000) {
   HpackSize(*this, 32768, 1000);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode32768Decode4096) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode32768Decode4096) {
   HpackSize(*this, 32768, 4096);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode32768Decode32768) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode32768Decode32768) {
   HpackSize(*this, 32768, 32768);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode32768Decode4194304) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode32768Decode4194304) {
   HpackSize(*this, 32768, 4194304);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode4194304Decode0) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode4194304Decode0) {
   HpackSize(*this, 4194304, 0);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode4194304Decode100) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode4194304Decode100) {
   HpackSize(*this, 4194304, 100);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode4194304Decode1000) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode4194304Decode1000) {
   HpackSize(*this, 4194304, 1000);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode4194304Decode4096) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode4194304Decode4096) {
   HpackSize(*this, 4194304, 4096);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode4194304Decode32768) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode4194304Decode32768) {
   HpackSize(*this, 4194304, 32768);
 }
-CORE_END2END_TEST(Http2SingleHopTest, Encode4194304Decode4194304) {
+CORE_END2END_TEST(Http2SingleHopTests, Encode4194304Decode4194304) {
   HpackSize(*this, 4194304, 4194304);
 }
 

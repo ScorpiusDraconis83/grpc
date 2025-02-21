@@ -13,6 +13,7 @@
 # limitations under the License.
 
 load("//bazel:grpc_build_system.bzl", "grpc_cc_library", "grpc_cc_test", "grpc_package")
+load("//test/core/test_util:grpc_fuzzer.bzl", "grpc_fuzz_test")
 
 licenses(["notice"])
 
@@ -28,6 +29,7 @@ grpc_cc_test(
         "absl/functional:any_invocable",
         "gtest",
     ],
+    uses_polling = False,
     deps = [
         "//:gpr_platform",
         "//src/core:common_event_engine_closures",
@@ -39,7 +41,7 @@ grpc_cc_test(
     name = "forkable_test",
     srcs = ["forkable_test.cc"],
     external_deps = [
-        "absl/types:optional",
+        "absl/log:log",
         "gtest",
     ],
     deps = [
@@ -58,13 +60,14 @@ grpc_cc_test(
         "absl/time",
         "gtest",
     ],
+    uses_polling = False,
     deps = [
         "//:gpr",
         "//:grpc",
         "//src/core:event_engine_thread_count",
         "//src/core:event_engine_thread_pool",
         "//src/core:notification",
-        "//test/core/util:grpc_test_util_unsecure",
+        "//test/core/test_util:grpc_test_util_unsecure",
     ],
 )
 
@@ -72,10 +75,8 @@ grpc_cc_test(
     name = "endpoint_config_test",
     srcs = ["endpoint_config_test.cc"],
     external_deps = [
-        "absl/types:optional",
         "gtest",
     ],
-    language = "C++",
     uses_polling = False,
     deps = [
         "//:gpr_platform",
@@ -94,22 +95,13 @@ grpc_cc_test(
         "absl/time",
         "gtest",
     ],
+    uses_polling = False,
     deps = [
+        "mock_event_engine",
         "//:event_engine_base_hdrs",
         "//:gpr",
         "//src/core:default_event_engine",
-        "//test/core/util:grpc_test_util",
-    ],
-)
-
-grpc_cc_test(
-    name = "smoke_test",
-    srcs = ["smoke_test.cc"],
-    external_deps = ["gtest"],
-    deps = [
-        "//:event_engine_base_hdrs",
-        "//:gpr_platform",
-        "//test/core/util:grpc_test_util_unsecure",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -117,19 +109,25 @@ grpc_cc_test(
     name = "factory_test",
     srcs = ["factory_test.cc"],
     external_deps = ["gtest"],
+    uses_polling = False,
     deps = [
         "aborting_event_engine",
+        "mock_event_engine",
         "//:event_engine_base_hdrs",
         "//:gpr_platform",
         "//src/core:default_event_engine",
-        "//test/core/util:grpc_test_util_unsecure",
+        "//test/core/test_util:grpc_test_util_unsecure",
     ],
 )
 
 grpc_cc_test(
     name = "slice_buffer_test",
     srcs = ["slice_buffer_test.cc"],
-    external_deps = ["gtest"],
+    external_deps = [
+        "absl/log:check",
+        "gtest",
+    ],
+    uses_polling = False,
     deps = [
         "//:gpr",
         "//:gpr_platform",
@@ -181,12 +179,12 @@ grpc_cc_test(
     name = "tcp_socket_utils_test",
     srcs = ["tcp_socket_utils_test.cc"],
     external_deps = [
+        "absl/log:check",
         "absl/status",
         "absl/status:statusor",
         "absl/strings",
         "gtest",
     ],
-    language = "C++",
     uses_event_engine = False,
     uses_polling = False,
     deps = [
@@ -201,7 +199,6 @@ grpc_cc_test(
     name = "handle_tests",
     srcs = ["handle_tests.cc"],
     external_deps = ["gtest"],
-    language = "C++",
     uses_event_engine = False,
     uses_polling = False,
     deps = [
@@ -216,6 +213,8 @@ grpc_cc_library(
     srcs = ["event_engine_test_utils.cc"],
     hdrs = ["event_engine_test_utils.h"],
     external_deps = [
+        "absl/log:check",
+        "absl/log:log",
         "absl/status",
         "absl/status:statusor",
         "absl/strings",
@@ -230,7 +229,7 @@ grpc_cc_library(
         "//src/core:memory_quota",
         "//src/core:notification",
         "//src/core:time",
-        "//test/core/util:build",
+        "//test/core/test_util:build",
     ],
 )
 
@@ -238,11 +237,25 @@ grpc_cc_test(
     name = "query_extensions_test",
     srcs = ["query_extensions_test.cc"],
     external_deps = ["gtest"],
-    language = "C++",
     uses_event_engine = False,
     uses_polling = False,
     deps = [
         "//:gpr_platform",
         "//src/core:event_engine_query_extensions",
+    ],
+)
+
+grpc_fuzz_test(
+    name = "resolved_address_fuzzer",
+    srcs = ["resolved_address_fuzzer.cc"],
+    external_deps = [
+        "absl/log:check",
+        "fuzztest",
+        "fuzztest_main",
+    ],
+    tags = ["no_windows"],
+    deps = [
+        "//:grpc",
+        "//test/core/test_util:grpc_test_util",
     ],
 )

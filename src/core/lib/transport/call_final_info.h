@@ -15,12 +15,11 @@
 #ifndef GRPC_SRC_CORE_LIB_TRANSPORT_CALL_FINAL_INFO_H
 #define GRPC_SRC_CORE_LIB_TRANSPORT_CALL_FINAL_INFO_H
 
+#include <grpc/status.h>
 #include <grpc/support/port_platform.h>
+#include <grpc/support/time.h>
 
 #include <cstdint>
-
-#include <grpc/status.h>
-#include <grpc/support/time.h>
 
 struct grpc_transport_one_way_stats {
   uint64_t framing_bytes = 0;
@@ -42,7 +41,7 @@ void grpc_transport_move_stats(grpc_transport_stream_stats* from,
 
 struct grpc_call_stats {
   grpc_transport_stream_stats transport_stream_stats;
-  gpr_timespec latency;  // From call creating to enqueing of received status
+  gpr_timespec latency;  // From call creating to enqueuing of received status
 };
 /// Information about the call upon completion.
 struct grpc_call_final_info {

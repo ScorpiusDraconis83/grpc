@@ -12,21 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
 #include <chrono>
 #include <string>
 #include <thread>
 #include <vector>
 
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
+#include "absl/log/check.h"
+#include "envoy/config/cluster/v3/cluster.pb.h"
+#include "envoy/config/cluster/v3/outlier_detection.pb.h"
+#include "envoy/extensions/filters/http/fault/v3/fault.pb.h"
+#include "envoy/extensions/filters/http/router/v3/router.pb.h"
 #include "src/core/client_channel/backup_poller.h"
-#include "src/core/lib/config/config_vars.h"
-#include "src/proto/grpc/testing/xds/v3/cluster.grpc.pb.h"
-#include "src/proto/grpc/testing/xds/v3/fault.grpc.pb.h"
-#include "src/proto/grpc/testing/xds/v3/outlier_detection.grpc.pb.h"
-#include "src/proto/grpc/testing/xds/v3/router.grpc.pb.h"
-#include "test/core/util/resolve_localhost_ip46.h"
+#include "src/core/config/config_vars.h"
+#include "test/core/test_util/resolve_localhost_ip46.h"
 #include "test/cpp/end2end/xds/xds_end2end_test_lib.h"
 
 namespace grpc {
@@ -184,7 +185,7 @@ TEST_P(OutlierDetectionTest, SuccessRateMaxPercent) {
     EXPECT_LE(absl::Now(), deadline);
     if (absl::Now() >= deadline) break;
   }
-  // 1 backend should be ejected, trafficed picked up by another backend.
+  // 1 backend should be ejected, traffic picked up by another backend.
   // No other backend should be ejected.
   ResetBackendCounters();
   CheckRpcSendOk(DEBUG_LOCATION, 100, rpc_options);
@@ -202,7 +203,7 @@ TEST_P(OutlierDetectionTest, SuccessRateMaxPercent) {
     } else if (backends_[i]->backend_service()->request_count() == 100) {
       ++regular_load_backend_count;
     } else {
-      GPR_ASSERT(1);
+      CHECK(1);
     }
   }
   EXPECT_EQ(1, empty_load_backend_count);
@@ -264,7 +265,7 @@ TEST_P(OutlierDetectionTest, SuccessRateStdevFactor) {
   gpr_sleep_until(grpc_timeout_milliseconds_to_deadline(
       3000 * grpc_test_slowdown_factor()));
   ResetBackendCounters();
-  // 1 backend experenced failure, but since the stdev_factor is high, no
+  // 1 backend experienced failure, but since the stdev_factor is high, no
   // backend will be noticed as an outlier so no ejection.
   // Both backends are still getting the RPCs intended for them.
   CheckRpcSendOk(DEBUG_LOCATION, 100, rpc_options);
@@ -324,9 +325,9 @@ TEST_P(OutlierDetectionTest, SuccessRateEnforcementPercentage) {
   gpr_sleep_until(grpc_timeout_milliseconds_to_deadline(
       3000 * grpc_test_slowdown_factor()));
   ResetBackendCounters();
-  // 1 backend experenced failure, but since the enforcement percentage is 0, no
-  // backend will be ejected.
-  // Both backends are still getting the RPCs intended for them.
+  // 1 backend experienced failure, but since the enforcement percentage is 0,
+  // no backend will be ejected. Both backends are still getting the RPCs
+  // intended for them.
   CheckRpcSendOk(DEBUG_LOCATION, 100, rpc_options);
   CheckRpcSendOk(DEBUG_LOCATION, 100, rpc_options1);
   EXPECT_EQ(100, backends_[0]->backend_service()->request_count());
@@ -598,7 +599,7 @@ TEST_P(OutlierDetectionTest, FailurePercentageMaxPercentage) {
     EXPECT_LE(absl::Now(), deadline);
     if (absl::Now() >= deadline) break;
   }
-  // 1 backend should be ejected, trafficed picked up by another backend.
+  // 1 backend should be ejected, traffic picked up by another backend.
   // No other backend should be ejected.
   ResetBackendCounters();
   CheckRpcSendOk(DEBUG_LOCATION, 100, rpc_options);
@@ -616,7 +617,7 @@ TEST_P(OutlierDetectionTest, FailurePercentageMaxPercentage) {
     } else if (backends_[i]->backend_service()->request_count() == 100) {
       ++regular_load_backend_count;
     } else {
-      GPR_ASSERT(1);
+      CHECK(1);
     }
   }
   EXPECT_EQ(1, empty_load_backend_count);
@@ -675,7 +676,7 @@ TEST_P(OutlierDetectionTest, FailurePercentageThreshold) {
   gpr_sleep_until(grpc_timeout_milliseconds_to_deadline(
       3000 * grpc_test_slowdown_factor()));
   ResetBackendCounters();
-  // 1 backend experenced 1 failure, but since the threshold is 50 % no
+  // 1 backend experienced 1 failure, but since the threshold is 50 % no
   // backend will be noticed as an outlier so no ejection.
   // Both backends are still getting the RPCs intended for them.
   CheckRpcSendOk(DEBUG_LOCATION, 100, rpc_options);
@@ -736,9 +737,9 @@ TEST_P(OutlierDetectionTest, FailurePercentageEnforcementPercentage) {
   gpr_sleep_until(grpc_timeout_milliseconds_to_deadline(
       3000 * grpc_test_slowdown_factor()));
   ResetBackendCounters();
-  // 1 backend experenced failure, but since the enforcement percentage is 0, no
-  // backend will be ejected.
-  // Both backends are still getting the RPCs intended for them.
+  // 1 backend experienced failure, but since the enforcement percentage is 0,
+  // no backend will be ejected. Both backends are still getting the RPCs
+  // intended for them.
   CheckRpcSendOk(DEBUG_LOCATION, 100, rpc_options);
   CheckRpcSendOk(DEBUG_LOCATION, 100, rpc_options1);
   EXPECT_EQ(100, backends_[0]->backend_service()->request_count());
@@ -933,7 +934,7 @@ TEST_P(OutlierDetectionTest, SuccessRateAndFailurePercentage) {
   // Cause 2 errors on 1 backend and 1 error on 2 backends and wait for 2
   // backends to be ejected. The 2 errors to the 1 backend will make exactly 1
   // outlier from the success rate algorithm; all 4 errors will make 3 outliers
-  // from the failure pecentage algorithm because the threahold is set to 0. I
+  // from the failure percentage algorithm because the threshold is set to 0. I
   // have verified through debug logs we eject 1 backend because of success
   // rate, 1 backend because of failure percentage; but as we attempt to eject
   // another backend because of failure percentage we will stop as we have
@@ -984,7 +985,7 @@ TEST_P(OutlierDetectionTest, SuccessRateAndFailurePercentage) {
       // The extra load could go to 2 remaining backends or just 1 of them.
       ++double_load_backend_count;
     } else if (backends_[i]->backend_service()->request_count() > 300) {
-      GPR_ASSERT(1);
+      CHECK(1);
     }
   }
   EXPECT_EQ(2, empty_load_backend_count);
@@ -1035,7 +1036,7 @@ TEST_P(OutlierDetectionTest, SuccessRateAndFailurePercentageBothDisabled) {
   gpr_sleep_until(grpc_timeout_milliseconds_to_deadline(
       3000 * grpc_test_slowdown_factor()));
   ResetBackendCounters();
-  // 1 backend experenced failure, but since there is no counting there is no
+  // 1 backend experienced failure, but since there is no counting there is no
   // ejection.  Both backends are still getting the RPCs intended for them.
   CheckRpcSendOk(DEBUG_LOCATION, 100, rpc_options);
   CheckRpcSendOk(DEBUG_LOCATION, 100, rpc_options1);
@@ -1134,7 +1135,7 @@ TEST_P(OutlierDetectionTest, EjectionRetainedAcrossPriorities) {
   // Priority 0: backend 0 and a non-existent backend.
   // Priority 1: backend 1.
   EdsResourceArgs args({
-      {"locality0", {CreateEndpoint(0), MakeNonExistantEndpoint()}},
+      {"locality0", {CreateEndpoint(0), MakeNonExistentEndpoint()}},
       {"locality1", {CreateEndpoint(1)}, kDefaultLocalityWeight, 1},
   });
   balancer_->ads_service()->SetEdsResource(BuildEdsResource(args));
@@ -1154,7 +1155,7 @@ TEST_P(OutlierDetectionTest, EjectionRetainedAcrossPriorities) {
   // Now send an EDS update that moves backend 0 to priority 1.
   // We also add backend 2, so that we know when the client sees the update.
   args = EdsResourceArgs({
-      {"locality0", {MakeNonExistantEndpoint()}},
+      {"locality0", {MakeNonExistentEndpoint()}},
       {"locality1", CreateEndpointsForBackends(), kDefaultLocalityWeight, 1},
   });
   balancer_->ads_service()->SetEdsResource(BuildEdsResource(args));

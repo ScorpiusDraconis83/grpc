@@ -17,24 +17,20 @@
 //
 
 #include <grpc/support/port_platform.h>
-
 #include <stdio.h>
 
-#if defined(GPR_LINUX) || defined(GPR_FREEBSD) || defined(GPR_APPLE)
+#if defined(GPR_LINUX) || defined(GPR_FREEBSD) || defined(GPR_APPLE) || \
+    defined(GPR_WINDOWS)
 #include <string.h>
+#if defined(GPR_LINUX) || defined(GPR_FREEBSD) || defined(GPR_APPLE)
 #include <sys/param.h>
-
-#include "gtest/gtest.h"
+#endif  // GPR_LINUX || GPR_FREEBSD || GPR_APPLE
 
 #include <grpc/grpc_security.h>
 #include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
 #include <grpc/support/string_util.h>
 
-#include "src/core/lib/gpr/tmpfile.h"
-#include "src/core/lib/gprpp/crash.h"
-#include "src/core/lib/gprpp/env.h"
-#include "src/core/lib/gprpp/load_file.h"
+#include "gtest/gtest.h"
 #include "src/core/lib/security/context/security_context.h"
 #include "src/core/lib/security/security_connector/load_system_roots.h"
 #include "src/core/lib/security/security_connector/load_system_roots_supported.h"
@@ -43,11 +39,19 @@
 #include "src/core/lib/slice/slice_string_helpers.h"
 #include "src/core/tsi/ssl_transport_security.h"
 #include "src/core/tsi/transport_security.h"
-#include "test/core/util/test_config.h"
+#include "src/core/util/crash.h"
+#include "src/core/util/env.h"
+#include "src/core/util/load_file.h"
+#include "src/core/util/tmpfile.h"
+#include "test/core/test_util/test_config.h"
 
 namespace grpc {
 namespace {
 
+// The GetAbsoluteFilePath and CreateRootCertsBundle helper functions are only
+// defined on some platforms. On other platforms (e.g. Windows), we rely on
+// built-in helper functions to play similar (but not exactly the same) roles.
+#if defined(GPR_LINUX) || defined(GPR_FREEBSD) || defined(GPR_APPLE)
 TEST(AbsoluteFilePathTest, ConcatenatesCorrectly) {
   const char* directory = "nonexistent/test/directory";
   const char* filename = "doesnotexist.txt";
@@ -80,6 +84,15 @@ TEST(CreateRootCertsBundleTest, BundlesCorrectly) {
       << "Expected: \"" << result_slice.as_string_view() << "\"\n"
       << "Actual:   \"" << roots_bundle_str << "\"";
 }
+#endif  // GPR_LINUX || GPR_FREEBSD || GPR_APPLE
+
+#if defined(GPR_WINDOWS)
+TEST(LoadSystemRootCertsTest, Success) {
+  grpc_slice roots_slice = grpc_core::LoadSystemRootCerts();
+  EXPECT_FALSE(GRPC_SLICE_IS_EMPTY(roots_slice));
+  grpc_slice_unref(roots_slice);
+}
+#endif  // GPR_WINDOWS
 
 }  // namespace
 }  // namespace grpc
@@ -96,4 +109,4 @@ int main() {
       "systems ***\n");
   return 0;
 }
-#endif  // GPR_LINUX || GPR_FREEBSD || GPR_APPLE
+#endif  // GPR_LINUX || GPR_FREEBSD || GPR_APPLE || GPR_WINDOWS

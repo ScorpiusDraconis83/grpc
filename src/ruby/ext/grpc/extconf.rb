@@ -29,7 +29,7 @@ grpc_root = File.expand_path(File.join(File.dirname(__FILE__), '../../../..'))
 
 grpc_config = ENV['GRPC_CONFIG'] || 'opt'
 
-ENV['MACOSX_DEPLOYMENT_TARGET'] = '10.10'
+ENV['MACOSX_DEPLOYMENT_TARGET'] = '10.14'
 
 def debug_symbols_output_dir
   d = ENV['GRPC_RUBY_DEBUG_SYMBOLS_OUTPUT_DIR']
@@ -100,8 +100,6 @@ ENV['EMBED_OPENSSL'] = (RUBY_ENGINE != 'truffleruby').to_s
 # Don't embed on TruffleRuby (the system zlib is already linked for the zlib C extension, slow build times)
 ENV['EMBED_ZLIB'] = (RUBY_ENGINE != 'truffleruby').to_s
 
-ENV['EMBED_CARES'] = 'true'
-
 ENV['ARCH_FLAGS'] = RbConfig::CONFIG['ARCH_FLAG']
 if apple_toolchain && !cross_compiling
   if RUBY_PLATFORM =~ /arm64/
@@ -151,6 +149,7 @@ $CFLAGS << ' -g'
 def have_ruby_abi_version()
   return true if RUBY_ENGINE == 'truffleruby'
   # ruby_abi_version is only available in development versions: https://github.com/ruby/ruby/pull/6231
+  # See also discussion for Ruby 3.4 in https://github.com/grpc/grpc/pull/38338 and https://github.com/grpc/grpc/pull/38487
   return false if RUBY_PATCHLEVEL >= 0
 
   m = /(\d+)\.(\d+)/.match(RUBY_VERSION)

@@ -27,7 +27,7 @@ source tools/internal_ci/helper_scripts/prepare_build_macos_interop_rc
 # build C++ interop client and server
 mkdir -p cmake/build
 pushd cmake/build
-cmake -DgRPC_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release ../..
+cmake -DgRPC_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 ../..
 make interop_client interop_server -j4
 popd
 
@@ -42,7 +42,7 @@ tools/run_tests/run_interop_tests.py -l c++ \
     --prod_servers default gateway_v4 \
     --service_account_key_file="${KOKORO_KEYSTORE_DIR}/73836_interop_to_prod_tests_service_account_key" \
     --default_service_account="interop-to-prod-tests@grpc-testing.iam.gserviceaccount.com" \
-    --skip_compute_engine_creds --internal_ci -t -j 4 || FAILED="true"
+    --skip_compute_engine_creds -t -j 4 || FAILED="true"
 
 if [ "$FAILED" != "" ]
 then

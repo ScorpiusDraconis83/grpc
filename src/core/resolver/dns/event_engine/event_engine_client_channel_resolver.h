@@ -16,14 +16,15 @@
 #include <grpc/support/port_platform.h>
 
 #include "absl/strings/string_view.h"
-
-#include "src/core/lib/gprpp/orphanable.h"
 #include "src/core/resolver/resolver.h"
 #include "src/core/resolver/resolver_factory.h"
-#include "src/core/lib/uri/uri_parser.h"
+#include "src/core/util/orphanable.h"
+#include "src/core/util/uri.h"
 
 namespace grpc_core {
-class EventEngineClientChannelDNSResolverFactory : public ResolverFactory {
+
+class EventEngineClientChannelDNSResolverFactory final
+    : public ResolverFactory {
  public:
   absl::string_view scheme() const override { return "dns"; }
   bool IsValidUri(const URI& uri) const override;

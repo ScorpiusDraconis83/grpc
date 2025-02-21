@@ -18,31 +18,30 @@
 
 #include "src/core/lib/security/credentials/tls/grpc_tls_crl_provider.h"
 
+#include <grpc/grpc.h>
+#include <grpc/grpc_audit_logging.h>
+#include <grpc/grpc_crl_provider.h>
+#include <gtest/gtest.h>
+
 #include <chrono>
 #include <cstdlib>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include <gtest/gtest.h>
-
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
-
-#include <grpc/grpc.h>
-#include <grpc/grpc_audit_logging.h>
-#include <grpc/grpc_crl_provider.h>
-
 #include "src/core/lib/event_engine/default_event_engine.h"
 #include "src/core/lib/iomgr/timer_manager.h"
+#include "src/core/util/wait_for_single_owner.h"
 #include "test/core/event_engine/event_engine_test_utils.h"
 #include "test/core/event_engine/fuzzing_event_engine/fuzzing_event_engine.h"
 #include "test/core/event_engine/fuzzing_event_engine/fuzzing_event_engine.pb.h"
+#include "test/core/test_util/test_config.h"
+#include "test/core/test_util/tls_utils.h"
 #include "test/core/tsi/transport_security_test_lib.h"
-#include "test/core/util/test_config.h"
-#include "test/core/util/tls_utils.h"
 
 static constexpr absl::string_view kCrlPath =
     "test/core/tsi/test_creds/crl_data/crls/current.crl";
@@ -129,8 +128,7 @@ class DirectoryReloaderCrlProviderTest : public CrlProviderTest {
     event_engine_->FuzzingDone();
     exec_ctx.Flush();
     event_engine_->TickUntilIdle();
-    grpc_event_engine::experimental::WaitForSingleOwner(
-        std::move(event_engine_));
+    WaitForSingleOwner(std::move(event_engine_));
     grpc_shutdown_blocking();
     event_engine_.reset();
   }
@@ -282,6 +280,19 @@ TEST_F(DirectoryReloaderCrlProviderTest, WithBadInitialDirectoryStatus) {
   // callback will have been called
   ASSERT_TRUE(provider.ok()) << provider.status();
   EXPECT_EQ(reload_errors.size(), 1);
+}
+
+TEST(CertificateInfoImplTest, CanFetchValues) {
+  experimental::CertificateInfoImpl cert =
+      CertificateInfoImpl("issuer", "akid");
+  EXPECT_EQ(cert.Issuer(), "issuer");
+  EXPECT_EQ(cert.AuthorityKeyIdentifier(), "akid");
+}
+
+TEST(CertificateInfoImplTest, NoAkid) {
+  experimental::CertificateInfoImpl cert = CertificateInfoImpl("issuer");
+  EXPECT_EQ(cert.Issuer(), "issuer");
+  EXPECT_EQ(cert.AuthorityKeyIdentifier(), "");
 }
 
 }  // namespace testing

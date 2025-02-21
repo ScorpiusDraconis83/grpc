@@ -12,22 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <grpc/support/port_platform.h>
-
 #include "src/core/lib/security/authorization/cel_authorization_engine.h"
 
+#include <grpc/support/port_platform.h>
 #include <stddef.h>
 
 #include <algorithm>
+#include <optional>
 #include <utility>
 
+#include "absl/log/log.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "absl/types/span.h"
 #include "upb/base/string_view.h"
 #include "upb/message/map.h"
-
-#include <grpc/support/log.h>
 
 namespace grpc_core {
 
@@ -51,16 +49,14 @@ std::unique_ptr<CelAuthorizationEngine>
 CelAuthorizationEngine::CreateCelAuthorizationEngine(
     const std::vector<envoy_config_rbac_v3_RBAC*>& rbac_policies) {
   if (rbac_policies.empty() || rbac_policies.size() > 2) {
-    gpr_log(GPR_ERROR,
-            "Invalid rbac policies vector. Must contain either one or two rbac "
-            "policies.");
+    LOG(ERROR) << "Invalid rbac policies vector. Must contain either one or "
+                  "two rbac policies.";
     return nullptr;
   } else if (rbac_policies.size() == 2 &&
              (envoy_config_rbac_v3_RBAC_action(rbac_policies[0]) != kDeny ||
               envoy_config_rbac_v3_RBAC_action(rbac_policies[1]) != kAllow)) {
-    gpr_log(GPR_ERROR,
-            "Invalid rbac policies vector. Must contain one deny \
-                         policy and one allow policy, in that order.");
+    LOG(ERROR) << "Invalid rbac policies vector. Must contain one deny policy "
+                  "and one allow policy, in that order.";
     return nullptr;
   } else {
     return std::make_unique<CelAuthorizationEngine>(rbac_policies);
@@ -93,9 +89,9 @@ CelAuthorizationEngine::CelAuthorizationEngine(
           google_api_expr_v1alpha1_Expr_parse(serialized, serial_len,
                                               arena_.ptr());
       if (envoy_config_rbac_v3_RBAC_action(rbac_policy) == kAllow) {
-        allow_if_matched_.insert(std::make_pair(policy_name, parsed_condition));
+        allow_if_matched_.insert(std::pair(policy_name, parsed_condition));
       } else {
-        deny_if_matched_.insert(std::make_pair(policy_name, parsed_condition));
+        deny_if_matched_.insert(std::pair(policy_name, parsed_condition));
       }
     }
   }
@@ -128,7 +124,7 @@ std::unique_ptr<mock_cel::Activation> CelAuthorizationEngine::CreateActivation(
           header_items;
       for (const auto& header_key : header_keys_) {
         std::string temp_value;
-        absl::optional<absl::string_view> header_value =
+        std::optional<absl::string_view> header_value =
             args.GetHeaderValue(header_key, &temp_value);
         if (header_value.has_value()) {
           header_items.push_back(
@@ -176,10 +172,9 @@ std::unique_ptr<mock_cel::Activation> CelAuthorizationEngine::CreateActivation(
             mock_cel::CelValue::CreateStringView(cert_server_name));
       }
     } else {
-      gpr_log(GPR_ERROR,
-              "Error: Authorization engine does not support evaluating "
-              "attribute %s.",
-              elem.c_str());
+      LOG(ERROR) << "Error: Authorization engine does not support evaluating "
+                    "attribute "
+                 << elem;
     }
   }
   return activation;

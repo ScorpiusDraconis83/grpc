@@ -29,11 +29,10 @@ grpc_cc_test(
     external_deps = [
         "gtest",
     ],
-    language = "C++",
     tags = [],
     deps = [
         "//:grpc++",
         "//:grpcpp_chaotic_good",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )

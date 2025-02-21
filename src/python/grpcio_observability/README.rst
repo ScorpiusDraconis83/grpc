@@ -17,9 +17,6 @@ Note that while this approach enhances efficiency, it will introduce a slight de
 time the data is collected and the time it becomes available through Python exporters.
 
 
-Supported Python Versions
--------------------------
-Python >= 3.7
 
 Installation
 ------------
@@ -57,13 +54,13 @@ GCC-like stuff, but you may end up having a bad time.
 
 
 Dependencies
--------------------------
+------------
 gRPC Python Observability Depends on the following packages:
 
 ::
 
   grpcio
-  opentelemetry-api==1.21.0
+  opentelemetry-api
 
 
 Usage

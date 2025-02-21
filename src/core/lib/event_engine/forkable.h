@@ -19,23 +19,9 @@
 #include <memory>
 #include <vector>
 
-#include <grpc/support/log.h>
-
 #include "src/core/lib/debug/trace.h"
 
-namespace grpc_event_engine {
-namespace experimental {
-
-extern grpc_core::TraceFlag grpc_trace_fork;
-
-#define GRPC_FORK_TRACE_LOG(format, ...)                 \
-  do {                                                   \
-    if (GRPC_TRACE_FLAG_ENABLED(grpc_trace_fork)) {      \
-      gpr_log(GPR_DEBUG, "[fork] " format, __VA_ARGS__); \
-    }                                                    \
-  } while (0)
-
-#define GRPC_FORK_TRACE_LOG_STRING(format) GRPC_FORK_TRACE_LOG("%s", format)
+namespace grpc_event_engine::experimental {
 
 // An interface to be implemented by EventEngines that wish to have managed fork
 // support. The child class must guarantee that those methods are thread-safe.
@@ -76,7 +62,6 @@ class ObjectGroupForkHandler {
   std::vector<std::weak_ptr<Forkable> > forkables_;
 };
 
-}  // namespace experimental
-}  // namespace grpc_event_engine
+}  // namespace grpc_event_engine::experimental
 
 #endif  // GRPC_SRC_CORE_LIB_EVENT_ENGINE_FORKABLE_H
