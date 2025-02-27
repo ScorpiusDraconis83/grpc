@@ -13,13 +13,12 @@
 // limitations under the License.
 
 #include "absl/random/random.h"
-
-#include "test/core/transport/test_suite/test.h"
+#include "test/core/transport/test_suite/transport_test.h"
 
 namespace grpc_core {
 
 TRANSPORT_TEST(ManyUnaryRequests) {
-  SetServerAcceptor();
+  SetServerCallDestination();
   const int kNumRequests = absl::LogUniform<int>(rng(), 10, 100);
   std::list<std::string> call_names;
   auto make_call_name = [&call_names](int i,
@@ -30,19 +29,14 @@ TRANSPORT_TEST(ManyUnaryRequests) {
   std::map<int, std::string> client_messages;
   std::map<int, std::string> server_messages;
   for (int i = 0; i < kNumRequests; i++) {
-    auto initiator = CreateCall();
+    auto md = Arena::MakePooledForOverwrite<ClientMetadata>();
+    md->Set(HttpPathMetadata(), Slice::FromCopiedString(std::to_string(i)));
+    auto initiator = CreateCall(std::move(md));
     client_messages[i] = RandomMessage();
     server_messages[i] = RandomMessage();
     SpawnTestSeq(
         initiator, make_call_name(i, "initiator"),
-        [initiator, i]() mutable {
-          auto md = Arena::MakePooled<ClientMetadata>(GetContext<Arena>());
-          md->Set(HttpPathMetadata(),
-                  Slice::FromCopiedString(std::to_string(i)));
-          return initiator.PushClientInitialMetadata(std::move(md));
-        },
-        [initiator, i, &client_messages](StatusFlag status) mutable {
-          EXPECT_TRUE(status.ok());
+        [initiator, i, &client_messages]() mutable {
           return initiator.PushMessage(Arena::MakePooled<Message>(
               SliceBuffer(Slice::FromCopiedString(client_messages[i])), 0));
         },
@@ -52,7 +46,7 @@ TRANSPORT_TEST(ManyUnaryRequests) {
           return initiator.PullServerInitialMetadata();
         },
         [initiator](
-            ValueOrFailure<absl::optional<ServerMetadataHandle>> md) mutable {
+            ValueOrFailure<std::optional<ServerMetadataHandle>> md) mutable {
           EXPECT_TRUE(md.ok());
           EXPECT_TRUE(md.value().has_value());
           EXPECT_EQ(*md.value().value()->get_pointer(ContentTypeMetadata()),
@@ -60,22 +54,22 @@ TRANSPORT_TEST(ManyUnaryRequests) {
           return initiator.PullMessage();
         },
         [initiator, i,
-         &server_messages](NextResult<MessageHandle> msg) mutable {
+         &server_messages](ServerToClientNextMessage msg) mutable {
+          EXPECT_TRUE(msg.ok());
           EXPECT_TRUE(msg.has_value());
-          EXPECT_EQ(msg.value()->payload()->JoinIntoString(),
+          EXPECT_EQ(msg.value().payload()->JoinIntoString(),
                     server_messages[i]);
           return initiator.PullMessage();
         },
-        [initiator](NextResult<MessageHandle> msg) mutable {
+        [initiator](ServerToClientNextMessage msg) mutable {
+          EXPECT_TRUE(msg.ok());
           EXPECT_FALSE(msg.has_value());
-          EXPECT_FALSE(msg.cancelled());
           return initiator.PullServerTrailingMetadata();
         },
         [initiator](ValueOrFailure<ServerMetadataHandle> md) mutable {
           EXPECT_TRUE(md.ok());
           EXPECT_EQ(*md.value()->get_pointer(GrpcStatusMetadata()),
                     GRPC_STATUS_UNIMPLEMENTED);
-          return Empty{};
         });
   }
   for (int i = 0; i < kNumRequests; i++) {
@@ -93,16 +87,17 @@ TRANSPORT_TEST(ManyUnaryRequests) {
           return handler.PullMessage();
         },
         [handler, this_call_index,
-         &client_messages](NextResult<MessageHandle> msg) mutable {
+         &client_messages](ClientToServerNextMessage msg) mutable {
+          EXPECT_TRUE(msg.ok());
           EXPECT_TRUE(msg.has_value());
-          EXPECT_EQ(msg.value()->payload()->JoinIntoString(),
+          EXPECT_EQ(msg.value().payload()->JoinIntoString(),
                     client_messages[*this_call_index]);
           return handler.PullMessage();
         },
-        [handler](NextResult<MessageHandle> msg) mutable {
+        [handler](ClientToServerNextMessage msg) mutable {
+          EXPECT_TRUE(msg.ok());
           EXPECT_FALSE(msg.has_value());
-          EXPECT_FALSE(msg.cancelled());
-          auto md = Arena::MakePooled<ServerMetadata>(GetContext<Arena>());
+          auto md = Arena::MakePooledForOverwrite<ServerMetadata>();
           md->Set(ContentTypeMetadata(), ContentTypeMetadata::kApplicationGrpc);
           return handler.PushServerInitialMetadata(std::move(md));
         },
@@ -116,13 +111,9 @@ TRANSPORT_TEST(ManyUnaryRequests) {
         },
         [handler](StatusFlag result) mutable {
           EXPECT_TRUE(result.ok());
-          auto md = Arena::MakePooled<ServerMetadata>(GetContext<Arena>());
+          auto md = Arena::MakePooledForOverwrite<ServerMetadata>();
           md->Set(GrpcStatusMetadata(), GRPC_STATUS_UNIMPLEMENTED);
-          return handler.PushServerTrailingMetadata(std::move(md));
-        },
-        [handler](StatusFlag result) mutable {
-          EXPECT_TRUE(result.ok());
-          return Empty{};
+          handler.PushServerTrailingMetadata(std::move(md));
         });
   }
   WaitForAllPendingWork();

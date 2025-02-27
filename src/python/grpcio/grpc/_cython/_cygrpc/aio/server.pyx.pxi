@@ -542,7 +542,7 @@ async def _handle_unary_unary_rpc(object method_handler,
         request_raw,
     )
 
-    # Creates a dedecated ServicerContext
+    # Creates a dedicated ServicerContext
     cdef _ServicerContext servicer_context = _ServicerContext(
         rpc_state,
         None,
@@ -575,7 +575,7 @@ async def _handle_unary_stream_rpc(object method_handler,
         request_raw,
     )
 
-    # Creates a dedecated ServicerContext
+    # Creates a dedicated ServicerContext
     cdef _ServicerContext servicer_context = _ServicerContext(
         rpc_state,
         method_handler.request_deserializer,
@@ -623,7 +623,7 @@ cdef class _MessageReceiver:
 async def _handle_stream_unary_rpc(object method_handler,
                                    RPCState rpc_state,
                                    object loop):
-    # Creates a dedecated ServicerContext
+    # Creates a dedicated ServicerContext
     cdef _ServicerContext servicer_context = _ServicerContext(
         rpc_state,
         method_handler.request_deserializer,
@@ -655,7 +655,7 @@ async def _handle_stream_unary_rpc(object method_handler,
 async def _handle_stream_stream_rpc(object method_handler,
                                     RPCState rpc_state,
                                     object loop):
-    # Creates a dedecated ServicerContext
+    # Creates a dedicated ServicerContext
     cdef _ServicerContext servicer_context = _ServicerContext(
         rpc_state,
         method_handler.request_deserializer,
@@ -777,9 +777,19 @@ async def _schedule_rpc_coro(object rpc_coro,
         rpc_state,
         rpc_coro,
         loop,
-    ))
+    ), name="HandleExceptions[%s]" % _decode(rpc_state.method()))
     _add_callback_handler(rpc_task, rpc_state)
     await _handle_cancellation_from_core(rpc_task, rpc_state, loop)
+    try:
+        # Propagate any errors not handled by _handle_exceptions. If not awaited
+        # there will be logs of the form "Task exception was never retrieved".
+        # Catching it here we can provide traceback and debugging logs.
+        await rpc_task
+    except:
+        _LOGGER.exception('Exception not handled by _handle_exceptions in servicer method [%s]' % (
+            _decode(rpc_state.method()),
+        ))
+        traceback.print_exc()
 
 
 async def _handle_rpc(list generic_handlers, tuple interceptors,
@@ -861,7 +871,7 @@ cdef class _ConcurrentRpcLimiter:
 
     def __cinit__(self, int maximum_concurrent_rpcs):
         if maximum_concurrent_rpcs <= 0:
-            raise ValueError("maximum_concurrent_rpcs should be a postive integer")
+            raise ValueError("maximum_concurrent_rpcs should be a positive integer")
         self._maximum_concurrent_rpcs = maximum_concurrent_rpcs
         self._active_rpcs = 0
         self.limiter_concurrency_exceeded = False
@@ -954,6 +964,7 @@ cdef class AioServer:
         self._server.start(backup_queue=False)
         cdef RPCState rpc_state
         server_started.set_result(True)
+        rpc_tasks = set()
 
         while True:
             # When shutdown begins, no more new connections.
@@ -985,8 +996,14 @@ cdef class AioServer:
                     rpc_coro,
                     rpc_state,
                     self._loop
-                )
+                ),
+                name="rpc_task",
             )
+
+            # loop.create_task only holds a weakref to the task.
+            # Maintain reference to tasks to avoid garbage collection.
+            rpc_tasks.add(rpc_task)
+            rpc_task.add_done_callback(rpc_tasks.discard)
 
             if self._limiter is not None:
                 self._limiter.decrease_once_finished(rpc_task)

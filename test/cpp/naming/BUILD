@@ -38,8 +38,16 @@ grpc_py_binary(
 grpc_cc_test(
     name = "cancel_ares_query_test",
     srcs = ["cancel_ares_query_test.cc"],
-    external_deps = ["gtest"],
-    tags = ["cancel_ares_query_test"],
+    external_deps = [
+        "absl/log:check",
+        "gtest",
+    ],
+    tags = [
+        "cancel_ares_query_test",
+        "grpc:fails-internally",
+        # b/117575742.
+        "grpc:no-internal-poller",
+    ],
     deps = [
         "//:gpr",
         "//:grpc",
@@ -47,9 +55,9 @@ grpc_cc_test(
         "//src/core:ares_resolver",
         "//src/core:channel_args",
         "//test/core/end2end:cq_verifier",
-        "//test/core/util:fake_udp_and_tcp_server",
-        "//test/core/util:grpc_test_util",
-        "//test/core/util:socket_use_after_close_detector",
+        "//test/core/test_util:fake_udp_and_tcp_server",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:socket_use_after_close_detector",
         "//test/cpp/util:test_config",
         "//test/cpp/util:test_util",
     ],

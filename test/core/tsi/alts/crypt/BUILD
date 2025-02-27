@@ -28,12 +28,11 @@ grpc_cc_test(
         "gtest",
         "absl/types:span",
     ],
-    language = "C++",
     deps = [
         ":alts_crypt_test_util",
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 

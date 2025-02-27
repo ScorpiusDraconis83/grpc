@@ -23,6 +23,7 @@
 
 // IWYU pragma: no_include <ares_build.h>
 
+#include <ares.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
@@ -33,25 +34,21 @@
 #include <unordered_set>
 #include <utility>
 
-#include <ares.h>
-
 #include "absl/base/thread_annotations.h"
+#include "absl/log/check.h"
 #include "absl/strings/str_cat.h"
-
-#include <grpc/support/log.h>
-
-#include "src/core/resolver/dns/c_ares/grpc_ares_ev_driver.h"
-#include "src/core/resolver/dns/c_ares/grpc_ares_wrapper.h"
-#include "src/core/lib/gprpp/sync.h"
 #include "src/core/lib/iomgr/closure.h"
 #include "src/core/lib/iomgr/error.h"
 #include "src/core/lib/iomgr/ev_posix.h"
 #include "src/core/lib/iomgr/iomgr_fwd.h"
 #include "src/core/lib/iomgr/socket_utils_posix.h"
+#include "src/core/resolver/dns/c_ares/grpc_ares_ev_driver.h"
+#include "src/core/resolver/dns/c_ares/grpc_ares_wrapper.h"
+#include "src/core/util/sync.h"
 
 namespace grpc_core {
 
-class GrpcPolledFdPosix : public GrpcPolledFd {
+class GrpcPolledFdPosix final : public GrpcPolledFd {
  public:
   GrpcPolledFdPosix(ares_socket_t as, grpc_pollset_set* driver_pollset_set)
       : name_(absl::StrCat("c-ares fd: ", static_cast<int>(as))), as_(as) {
@@ -105,7 +102,7 @@ class GrpcPolledFdPosix : public GrpcPolledFd {
   grpc_pollset_set* driver_pollset_set_ ABSL_GUARDED_BY(&grpc_ares_request::mu);
 };
 
-class GrpcPolledFdFactoryPosix : public GrpcPolledFdFactory {
+class GrpcPolledFdFactoryPosix final : public GrpcPolledFdFactory {
  public:
   ~GrpcPolledFdFactoryPosix() override {
     for (auto& fd : owned_fds_) {
@@ -116,7 +113,7 @@ class GrpcPolledFdFactoryPosix : public GrpcPolledFdFactory {
   GrpcPolledFd* NewGrpcPolledFdLocked(
       ares_socket_t as, grpc_pollset_set* driver_pollset_set) override {
     auto insert_result = owned_fds_.insert(as);
-    GPR_ASSERT(insert_result.second);
+    CHECK(insert_result.second);
     return new GrpcPolledFdPosix(as, driver_pollset_set);
   }
 

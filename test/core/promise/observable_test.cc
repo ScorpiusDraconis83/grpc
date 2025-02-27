@@ -14,6 +14,8 @@
 
 #include "src/core/lib/promise/observable.h"
 
+#include <grpc/support/log.h>
+
 #include <cstdint>
 #include <limits>
 #include <thread>
@@ -22,10 +24,10 @@
 #include "absl/strings/str_join.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-
-#include "src/core/lib/gprpp/notification.h"
 #include "src/core/lib/promise/loop.h"
 #include "src/core/lib/promise/map.h"
+#include "src/core/util/notification.h"
+#include "test/core/promise/poll_matcher.h"
 
 using testing::Mock;
 using testing::StrictMock;
@@ -57,34 +59,6 @@ class MockActivity : public Activity, public Wakeable {
  private:
   std::unique_ptr<ScopedActivity> scoped_activity_;
 };
-
-MATCHER(IsPending, "") {
-  if (arg.ready()) {
-    *result_listener << "is ready";
-    return false;
-  }
-  return true;
-}
-
-MATCHER(IsReady, "") {
-  if (arg.pending()) {
-    *result_listener << "is pending";
-    return false;
-  }
-  return true;
-}
-
-MATCHER_P(IsReady, value, "") {
-  if (arg.pending()) {
-    *result_listener << "is pending";
-    return false;
-  }
-  if (arg.value() != value) {
-    *result_listener << "is " << ::testing::PrintToString(arg.value());
-    return false;
-  }
-  return true;
-}
 
 TEST(ObservableTest, ImmediateNext) {
   Observable<int> observable(1);
@@ -165,6 +139,16 @@ TEST(ObservableTest, MultipleActivitiesWakeUp) {
   Mock::VerifyAndClearExpectations(&activity2);
   EXPECT_THAT(next1(), IsReady(2));
   EXPECT_THAT(next2(), IsReady(2));
+}
+
+TEST(ObservableTest, NoDeadlockOnDestruction) {
+  StrictMock<MockActivity> activity;
+  Observable<int> observable(1);
+  activity.Activate();
+  {
+    auto next = observable.Next(1);
+    EXPECT_THAT(next(), IsPending());
+  }
 }
 
 class ThreadWakeupScheduler {

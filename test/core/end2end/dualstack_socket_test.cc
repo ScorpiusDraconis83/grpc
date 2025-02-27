@@ -1,5 +1,3 @@
-//
-//
 // Copyright 2015 gRPC authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,26 +11,28 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
-//
-
-#include <algorithm>
-#include <memory>
-#include <string>
-
-#include "absl/status/statusor.h"
 
 #include <grpc/impl/propagation_bits.h>
 #include <grpc/slice.h>
 #include <grpc/status.h>
 #include <grpc/support/time.h>
 
+#include <algorithm>
+#include <memory>
+#include <string>
+
+#include "absl/log/check.h"
+#include "absl/log/log.h"
+#include "absl/status/statusor.h"
 #include "src/core/lib/iomgr/port.h"
-#include "src/core/lib/iomgr/resolved_address.h"
 
 // This test won't work except with posix sockets enabled
 #ifdef GRPC_POSIX_SOCKET_EV
 
+#include <grpc/credentials.h>
+#include <grpc/grpc.h>
+#include <grpc/grpc_security.h>
+#include <grpc/support/alloc.h>
 #include <string.h>
 
 #include <vector>
@@ -41,23 +41,19 @@
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
-
-#include <grpc/grpc.h>
-#include <grpc/grpc_security.h>
-#include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
-
-#include "src/core/lib/address_utils/sockaddr_utils.h"
-#include "src/core/lib/gprpp/host_port.h"
-#include "src/core/lib/iomgr/error.h"
-#include "src/core/lib/iomgr/resolve_address.h"
+#include "src/core/lib/event_engine/tcp_socket_utils.h"
+#include "src/core/lib/event_engine/utils.h"
 #include "src/core/lib/iomgr/socket_utils_posix.h"
-#include "src/core/lib/transport/error_utils.h"
+#include "src/core/util/host_port.h"
 #include "test/core/end2end/cq_verifier.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
 
 // This test exercises IPv4, IPv6, and dualstack sockets in various ways.
+
+using grpc_event_engine::experimental::EventEngine;
+
+static absl::StatusOr<std::unique_ptr<EventEngine::DNSResolver>> ee_resolver;
 
 static void drain_cq(grpc_completion_queue* cq) {
   grpc_event ev;
@@ -68,15 +64,21 @@ static void drain_cq(grpc_completion_queue* cq) {
 }
 
 static void log_resolved_addrs(const char* label, const char* hostname) {
-  absl::StatusOr<std::vector<grpc_resolved_address>> addresses_or =
-      grpc_core::GetDNSResolver()->LookupHostnameBlocking(hostname, "80");
-  if (!addresses_or.ok()) {
-    GRPC_LOG_IF_ERROR(hostname,
-                      absl_status_to_grpc_error(addresses_or.status()));
+  if (!ee_resolver.ok()) {
     return;
   }
-  for (const auto& addr : *addresses_or) {
-    gpr_log(GPR_INFO, "%s: %s", label, grpc_sockaddr_to_uri(&addr)->c_str());
+  absl::StatusOr<std::vector<EventEngine::ResolvedAddress>> addresses =
+      grpc_event_engine::experimental::LookupHostnameBlocking(
+          ee_resolver->get(), hostname, "80");
+  if (!addresses.ok()) {
+    LOG(ERROR) << "Failed to lookup hostname: " << hostname
+               << ", status: " << addresses.status();
+    return;
+  }
+  for (const auto& addr : *addresses) {
+    LOG(INFO)
+        << label << ": "
+        << grpc_event_engine::experimental::ResolvedAddressToURI(addr)->c_str();
   }
 }
 
@@ -120,13 +122,13 @@ void test_connect(const char* server_host, const char* client_host, int port,
   grpc_server_register_completion_queue(server, cq, nullptr);
   grpc_server_credentials* server_creds =
       grpc_insecure_server_credentials_create();
-  GPR_ASSERT((got_port = grpc_server_add_http2_port(
-                  server, server_hostport.c_str(), server_creds)) > 0);
+  CHECK((got_port = grpc_server_add_http2_port(server, server_hostport.c_str(),
+                                               server_creds)) > 0);
   grpc_server_credentials_release(server_creds);
   if (port == 0) {
     port = got_port;
   } else {
-    GPR_ASSERT(port == got_port);
+    CHECK_EQ(port, got_port);
   }
   grpc_server_start(server);
   grpc_core::CqVerifier cqv(cq);
@@ -150,9 +152,9 @@ void test_connect(const char* server_host, const char* client_host, int port,
   client = grpc_channel_create(client_hostport.c_str(), creds, nullptr);
   grpc_channel_credentials_release(creds);
 
-  gpr_log(GPR_INFO, "Testing with server=%s client=%s (expecting %s)",
-          server_hostport.c_str(), client_hostport.c_str(),
-          expect_ok ? "success" : "failure");
+  LOG(INFO) << "Testing with server=" << server_hostport.c_str()
+            << " client=" << client_hostport.c_str() << " (expecting "
+            << (expect_ok ? "success" : "failure") << ")";
   log_resolved_addrs("server resolved addr", server_host);
   log_resolved_addrs("client resolved addr", client_host);
 
@@ -170,7 +172,7 @@ void test_connect(const char* server_host, const char* client_host, int port,
   c = grpc_channel_create_call(client, nullptr, GRPC_PROPAGATE_DEFAULTS, cq,
                                grpc_slice_from_static_string("/foo"), &host,
                                deadline, nullptr);
-  GPR_ASSERT(c);
+  CHECK(c);
 
   memset(ops, 0, sizeof(ops));
   op = ops;
@@ -197,14 +199,14 @@ void test_connect(const char* server_host, const char* client_host, int port,
   op++;
   error = grpc_call_start_batch(c, ops, static_cast<size_t>(op - ops),
                                 grpc_core::CqVerifier::tag(1), nullptr);
-  GPR_ASSERT(GRPC_CALL_OK == error);
+  CHECK_EQ(error, GRPC_CALL_OK);
 
   if (expect_ok) {
     // Check for a successful request.
     error = grpc_server_request_call(server, &s, &call_details,
                                      &request_metadata_recv, cq, cq,
                                      grpc_core::CqVerifier::tag(101));
-    GPR_ASSERT(GRPC_CALL_OK == error);
+    CHECK_EQ(error, GRPC_CALL_OK);
     cqv.Expect(grpc_core::CqVerifier::tag(101), true);
     cqv.Verify();
 
@@ -227,22 +229,21 @@ void test_connect(const char* server_host, const char* client_host, int port,
     op++;
     error = grpc_call_start_batch(s, ops, static_cast<size_t>(op - ops),
                                   grpc_core::CqVerifier::tag(102), nullptr);
-    GPR_ASSERT(GRPC_CALL_OK == error);
+    CHECK_EQ(error, GRPC_CALL_OK);
 
     cqv.Expect(grpc_core::CqVerifier::tag(102), true);
     cqv.Expect(grpc_core::CqVerifier::tag(1), true);
     cqv.Verify();
 
     peer = grpc_call_get_peer(c);
-    gpr_log(GPR_DEBUG, "got peer: '%s'", peer);
+    VLOG(2) << "got peer: '" << peer << "'";
     gpr_free(peer);
 
-    GPR_ASSERT(status == GRPC_STATUS_UNIMPLEMENTED);
-    GPR_ASSERT(0 == grpc_slice_str_cmp(details, "xyz"));
-    GPR_ASSERT(0 == grpc_slice_str_cmp(call_details.method, "/foo"));
-    GPR_ASSERT(0 ==
-               grpc_slice_str_cmp(call_details.host, "foo.test.google.fr"));
-    GPR_ASSERT(was_cancelled == 0);
+    CHECK_EQ(status, GRPC_STATUS_UNIMPLEMENTED);
+    CHECK_EQ(grpc_slice_str_cmp(details, "xyz"), 0);
+    CHECK_EQ(grpc_slice_str_cmp(call_details.method, "/foo"), 0);
+    CHECK_EQ(grpc_slice_str_cmp(call_details.host, "foo.test.google.fr"), 0);
+    CHECK_EQ(was_cancelled, 0);
 
     grpc_call_unref(s);
   } else {
@@ -250,9 +251,9 @@ void test_connect(const char* server_host, const char* client_host, int port,
     cqv.Expect(grpc_core::CqVerifier::tag(1), true);
     cqv.Verify();
 
-    gpr_log(GPR_INFO, "status: %d (expected: %d)", status,
-            GRPC_STATUS_UNAVAILABLE);
-    GPR_ASSERT(status == GRPC_STATUS_UNAVAILABLE);
+    LOG(INFO) << "status: " << status
+              << " (expected: " << GRPC_STATUS_UNAVAILABLE << ")";
+    CHECK_EQ(status, GRPC_STATUS_UNAVAILABLE);
   }
 
   grpc_call_unref(c);
@@ -286,24 +287,27 @@ void test_connect(const char* server_host, const char* client_host, int port,
 }
 
 int external_dns_works(const char* host) {
-  auto addresses_or =
-      grpc_core::GetDNSResolver()->LookupHostnameBlocking(host, "80");
-  if (!addresses_or.ok()) {
+  if (!ee_resolver.ok()) {
+    return 0;
+  }
+  absl::StatusOr<std::vector<EventEngine::ResolvedAddress>> addresses =
+      grpc_event_engine::experimental::LookupHostnameBlocking(
+          ee_resolver->get(), host, "80");
+  if (!addresses.ok()) {
     return 0;
   }
   int result = 1;
-  for (const auto& addr : *addresses_or) {
+  for (const auto& addr : *addresses) {
     // Kokoro on Macservice uses Google DNS64 servers by default
     // (https://en.wikipedia.org/wiki/Google_Public_DNS) and that breaks
     // "dualstack_socket_test" due to loopback4.unittest.grpc.io resolving to
     // [64:ff9b::7f00:1]. (Working as expected for DNS64, but it prevents the
     // dualstack_socket_test from functioning correctly). See b/201064791.
-    if (grpc_sockaddr_to_uri(&addr).value() ==
+    if (grpc_event_engine::experimental::ResolvedAddressToURI(addr).value() ==
         "ipv6:%5B64:ff9b::7f00:1%5D:80") {
-      gpr_log(
-          GPR_INFO,
-          "Detected DNS64 server response. Tests that depend on "
-          "*.unittest.grpc.io. will be skipped as they won't work with DNS64.");
+      LOG(INFO) << "Detected DNS64 server response. Tests that depend on "
+                   "*.unittest.grpc.io. will be skipped as they won't work "
+                   "with DNS64.";
       result = 0;
       break;
     }
@@ -318,8 +322,17 @@ int main(int argc, char** argv) {
   grpc_init();
 
   if (!grpc_ipv6_loopback_available()) {
-    gpr_log(GPR_INFO, "Can't bind to ::1.  Skipping IPv6 tests.");
+    LOG(INFO) << "Can't bind to ::1.  Skipping IPv6 tests.";
     do_ipv6 = 0;
+  }
+
+  ee_resolver =
+      grpc_event_engine::experimental::GetDefaultEventEngine()->GetDNSResolver(
+          grpc_event_engine::experimental::EventEngine::DNSResolver::
+              ResolverOptions());
+  if (!ee_resolver.ok()) {
+    LOG(ERROR) << "Failed to get EventEngine DNSResolver: "
+               << ee_resolver.status();
   }
 
   // For coverage, test with and without dualstack sockets.
@@ -359,7 +372,7 @@ int main(int argc, char** argv) {
 
     if (!external_dns_works("loopback4.unittest.grpc.io") ||
         !external_dns_works("loopback46.unittest.grpc.io")) {
-      gpr_log(GPR_INFO, "Skipping tests that depend on *.unittest.grpc.io.");
+      LOG(INFO) << "Skipping tests that depend on *.unittest.grpc.io.";
     } else {
       test_connect("loopback46.unittest.grpc.io", "loopback4.unittest.grpc.io",
                    0, 1);

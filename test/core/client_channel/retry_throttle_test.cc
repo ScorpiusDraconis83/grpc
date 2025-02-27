@@ -19,8 +19,7 @@
 #include "src/core/client_channel/retry_throttle.h"
 
 #include "gtest/gtest.h"
-
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/test_config.h"
 
 namespace grpc_core {
 namespace internal {

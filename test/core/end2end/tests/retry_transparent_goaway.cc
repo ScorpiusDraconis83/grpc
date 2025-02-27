@@ -14,27 +14,27 @@
 // limitations under the License.
 //
 
-#include <memory>
-#include <new>
-
-#include "absl/status/status.h"
-#include "absl/types/optional.h"
-#include "gtest/gtest.h"
-
 #include <grpc/impl/channel_arg_names.h>
 #include <grpc/status.h>
 
+#include <memory>
+#include <new>
+#include <optional>
+
+#include "absl/status/status.h"
+#include "gtest/gtest.h"
+#include "src/core/config/core_configuration.h"
 #include "src/core/lib/channel/channel_fwd.h"
 #include "src/core/lib/channel/channel_stack.h"
-#include "src/core/lib/config/core_configuration.h"
-#include "src/core/lib/gprpp/status_helper.h"
-#include "src/core/lib/gprpp/time.h"
 #include "src/core/lib/iomgr/call_combiner.h"
 #include "src/core/lib/iomgr/closure.h"
 #include "src/core/lib/iomgr/error.h"
 #include "src/core/lib/surface/channel_stack_type.h"
 #include "src/core/lib/transport/metadata_batch.h"
 #include "src/core/lib/transport/transport.h"
+#include "src/core/util/status_helper.h"
+#include "src/core/util/time.h"
+#include "src/core/util/unique_type_name.h"
 #include "test/core/end2end/end2end_tests.h"
 
 namespace grpc_core {
@@ -115,8 +115,6 @@ class FailFirstCallFilter {
 
 grpc_channel_filter FailFirstCallFilter::kFilterVtable = {
     CallData::StartTransportStreamOpBatch,
-    nullptr,
-    nullptr,
     grpc_channel_next_op,
     sizeof(CallData),
     CallData::Init,
@@ -127,11 +125,12 @@ grpc_channel_filter FailFirstCallFilter::kFilterVtable = {
     grpc_channel_stack_no_post_init,
     Destroy,
     grpc_channel_next_get_info,
-    "FailFirstCallFilter",
+    GRPC_UNIQUE_TYPE_NAME_HERE("FailFirstCallFilter"),
 };
 
 // Tests transparent retries when the call was never sent out on the wire.
-CORE_END2END_TEST(RetryTest, TransparentGoaway) {
+CORE_END2END_TEST(RetryTests, TransparentGoaway) {
+  SKIP_IF_V3();  // Need to convert filter
   CoreConfiguration::RegisterBuilder([](CoreConfiguration::Builder* builder) {
     builder->channel_init()
         ->RegisterFilter(GRPC_CLIENT_SUBCHANNEL,
@@ -141,16 +140,16 @@ CORE_END2END_TEST(RetryTest, TransparentGoaway) {
   });
   auto c =
       NewClientCall("/service/method").Timeout(Duration::Minutes(1)).Create();
-  EXPECT_NE(c.GetPeer(), absl::nullopt);
+  EXPECT_NE(c.GetPeer(), std::nullopt);
   // Start a batch containing send ops.
   c.NewBatch(1)
       .SendInitialMetadata({})
       .SendMessage("foo")
       .SendCloseFromClient();
   // Start a batch containing recv ops.
-  CoreEnd2endTest::IncomingStatusOnClient server_status;
-  CoreEnd2endTest::IncomingMetadata server_initial_metadata;
-  CoreEnd2endTest::IncomingMessage server_message;
+  IncomingStatusOnClient server_status;
+  IncomingMetadata server_initial_metadata;
+  IncomingMessage server_message;
   c.NewBatch(2)
       .RecvInitialMetadata(server_initial_metadata)
       .RecvMessage(server_message)
@@ -163,12 +162,12 @@ CORE_END2END_TEST(RetryTest, TransparentGoaway) {
   Expect(101, true);
   Step();
   // Server receives the request.
-  CoreEnd2endTest::IncomingMessage client_message;
+  IncomingMessage client_message;
   s.NewBatch(102).RecvMessage(client_message);
   Expect(102, true);
   Step();
   // Server sends a response with status OK.
-  CoreEnd2endTest::IncomingCloseOnServer client_close;
+  IncomingCloseOnServer client_close;
   s.NewBatch(103)
       .RecvCloseOnServer(client_close)
       .SendInitialMetadata({})
@@ -188,7 +187,7 @@ CORE_END2END_TEST(RetryTest, TransparentGoaway) {
   EXPECT_EQ(client_message.payload(), "foo");
   // Make sure the "grpc-previous-rpc-attempts" header was NOT sent, since
   // we don't do that for transparent retries.
-  EXPECT_EQ(s.GetInitialMetadata("grpc-previous-rpc-attempts"), absl::nullopt);
+  EXPECT_EQ(s.GetInitialMetadata("grpc-previous-rpc-attempts"), std::nullopt);
 }
 
 }  // namespace

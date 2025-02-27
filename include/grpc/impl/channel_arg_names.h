@@ -67,9 +67,6 @@
    application will see the compressed message in the byte buffer. */
 #define GRPC_ARG_ENABLE_PER_MESSAGE_DECOMPRESSION \
   "grpc.per_message_decompression"
-/** Enable/disable support for deadline checking. Defaults to 1, unless
-    GRPC_ARG_MINIMAL_STACK is enabled, in which case it defaults to 0 */
-#define GRPC_ARG_ENABLE_DEADLINE_CHECKS "grpc.enable_deadline_checking"
 /** Initial stream ID for http2 transports. Int valued. */
 #define GRPC_ARG_HTTP2_INITIAL_SEQUENCE_NUMBER \
   "grpc.http2.initial_sequence_number"
@@ -114,9 +111,11 @@
   "grpc.server_max_unrequested_time_in_server"
 /** Channel arg to override the http2 :scheme header */
 #define GRPC_ARG_HTTP2_SCHEME "grpc.http2_scheme"
-/** How many pings can the client send before needing to send a
-   data/header frame? (0 indicates that an infinite number of
-   pings can be sent without sending a data frame or header frame) */
+/** How many pings can the client send before needing to send a data/header
+   frame? (0 indicates that an infinite number of pings can be sent without
+   sending a data frame or header frame).
+   If experiment "max_pings_wo_data_throttle" is enabled, instead of pings being
+   completely blocked, they are throttled. */
 #define GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA \
   "grpc.http2.max_pings_without_data"
 /** How many misbehaving pings the server can bear before sending goaway and
@@ -231,10 +230,6 @@
  * level. Disabling channelz naturally disables channel tracing. The default
  * is for channelz to be enabled. */
 #define GRPC_ARG_ENABLE_CHANNELZ "grpc.enable_channelz"
-/** If non-zero, Cronet transport will coalesce packets to fewer frames
- * when possible. */
-#define GRPC_ARG_USE_CRONET_PACKET_COALESCING \
-  "grpc.use_cronet_packet_coalescing"
 /** Channel arg (integer) setting how large a slice to try and read from the
    wire each time recvmsg (or equivalent) is called **/
 #define GRPC_ARG_TCP_READ_CHUNK_SIZE "grpc.experimental.tcp_read_chunk_size"
@@ -260,7 +255,7 @@
    issued by the tcp_write(). By default, this is set to 4. */
 #define GRPC_ARG_TCP_TX_ZEROCOPY_MAX_SIMULT_SENDS \
   "grpc.experimental.tcp_tx_zerocopy_max_simultaneous_sends"
-/* Overrides the TCP socket recieve buffer size, SO_RCVBUF. */
+/* Overrides the TCP socket receive buffer size, SO_RCVBUF. */
 #define GRPC_ARG_TCP_RECEIVE_BUFFER_SIZE "grpc.tcp_receive_buffer_size"
 /* Timeout in milliseconds to use for calls to the grpclb load balancer.
    If 0 or unset, the balancer calls will have no deadline. */
@@ -291,9 +286,6 @@
    over to the next priority. Default value is 10 seconds. */
 #define GRPC_ARG_PRIORITY_FAILOVER_TIMEOUT_MS \
   "grpc.priority_failover_timeout_ms"
-/** If non-zero, grpc server's cronet compression workaround will be enabled */
-#define GRPC_ARG_WORKAROUND_CRONET_COMPRESSION \
-  "grpc.workaround.cronet_compression"
 /** String defining the optimization target for a channel.
     Can be: "latency"    - attempt to minimize latency at the cost of throughput
             "blend"      - try to balance latency and throughput
@@ -395,6 +387,14 @@
  * factory. */
 #define GRPC_ARG_EVENT_ENGINE_USE_MEMORY_ALLOCATOR_FACTORY \
   "grpc.event_engine_use_memory_allocator_factory"
+/** Configure the max number of allowed incoming connections to the server.
+ * If unspecified, it is unlimited */
+#define GRPC_ARG_MAX_ALLOWED_INCOMING_CONNECTIONS \
+  "grpc.max_allowed_incoming_connections"
+/** Configure per-channel or per-server stats plugins. */
+#define GRPC_ARG_EXPERIMENTAL_STATS_PLUGINS "grpc.experimental.stats_plugins"
+/** If non-zero, allow security frames to be sent and received. */
+#define GRPC_ARG_SECURITY_FRAME_ALLOWED "grpc.security_frame_allowed"
 /** \} */
 
 #endif /* GRPC_IMPL_CHANNEL_ARG_NAMES_H */

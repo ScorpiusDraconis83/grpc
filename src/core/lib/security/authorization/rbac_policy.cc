@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <grpc/support/port_platform.h>
-
 #include "src/core/lib/security/authorization/rbac_policy.h"
+
+#include <grpc/support/port_platform.h>
 
 #include <utility>
 
@@ -312,7 +312,7 @@ Rbac::Principal Rbac::Principal::MakeAnyPrincipal() {
 }
 
 Rbac::Principal Rbac::Principal::MakeAuthenticatedPrincipal(
-    absl::optional<StringMatcher> string_matcher) {
+    std::optional<StringMatcher> string_matcher) {
   Principal principal;
   principal.type = Principal::RuleType::kPrincipalName;
   principal.string_matcher = std::move(string_matcher);

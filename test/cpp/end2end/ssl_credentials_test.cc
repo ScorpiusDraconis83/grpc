@@ -15,13 +15,7 @@
 // limitations under the License.
 //
 //
-#include <memory>
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
-#include "absl/synchronization/notification.h"
-
+#include <grpc/credentials.h>
 #include <grpc/grpc_security.h>
 #include <grpcpp/channel.h>
 #include <grpcpp/client_context.h>
@@ -29,9 +23,15 @@
 #include <grpcpp/server.h>
 #include <grpcpp/server_builder.h>
 
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
-#include "test/core/util/tls_utils.h"
+#include <memory>
+
+#include "absl/log/log.h"
+#include "absl/synchronization/notification.h"
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
+#include "test/core/test_util/tls_utils.h"
 #include "test/cpp/end2end/test_service_impl.h"
 
 namespace grpc {
@@ -98,12 +98,11 @@ void DoRpc(const std::string& server_addr,
   grpc::testing::EchoResponse response;
   request.set_message(kMessage);
   ClientContext context;
-  context.set_deadline(grpc_timeout_seconds_to_deadline(/*time_s=*/10));
+  context.set_deadline(grpc_timeout_seconds_to_deadline(/*time_s=*/60));
   grpc::Status result = stub->Echo(&context, request, &response);
   EXPECT_TRUE(result.ok());
   if (!result.ok()) {
-    gpr_log(GPR_ERROR, "%s, %s", result.error_message().c_str(),
-            result.error_details().c_str());
+    LOG(ERROR) << result.error_message() << ", " << result.error_details();
   }
   EXPECT_EQ(response.message(), kMessage);
   std::shared_ptr<const AuthContext> auth_context = context.auth_context();

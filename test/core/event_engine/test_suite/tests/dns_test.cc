@@ -15,34 +15,33 @@
 // IWYU pragma: no_include <ratio>
 // IWYU pragma: no_include <arpa/inet.h>
 
+#include <grpc/event_engine/event_engine.h>
 #include <grpc/support/port_platform.h>
 
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <vector>
 
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-
-#include <grpc/event_engine/event_engine.h>
-
-#include "src/core/lib/config/config_vars.h"
+#include "src/core/config/config_vars.h"
 #include "src/core/lib/event_engine/tcp_socket_utils.h"
-#include "src/core/lib/gprpp/crash.h"  // IWYU pragma: keep
-#include "src/core/lib/gprpp/notification.h"
 #include "src/core/lib/iomgr/sockaddr.h"
+#include "src/core/util/crash.h"  // IWYU pragma: keep
+#include "src/core/util/notification.h"
 #include "test/core/event_engine/test_suite/event_engine_test_framework.h"
-#include "test/core/util/fake_udp_and_tcp_server.h"
-#include "test/core/util/port.h"
+#include "test/core/test_util/fake_udp_and_tcp_server.h"
+#include "test/core/test_util/port.h"
 #include "test/cpp/util/get_grpc_test_runfile_dir.h"
 #include "test/cpp/util/subprocess.h"
 
@@ -111,13 +110,13 @@ MATCHER(StatusCodeEq, "") {
 class EventEngineDNSTest : public EventEngineTest {
  protected:
   static void SetUpTestSuite() {
-#ifndef GRPC_IOS_EVENT_ENGINE_CLIENT
+#if !GRPC_IOS_EVENT_ENGINE_CLIENT
     std::string test_records_path = kDNSTestRecordGroupsYamlPath;
     std::string dns_server_path = kDNSServerRelPath;
     std::string dns_resolver_path = kDNSResolverRelPath;
     std::string tcp_connect_path = kTCPConnectRelPath;
     std::string health_check_path = kHealthCheckRelPath;
-    absl::optional<std::string> runfile_dir = grpc::GetGrpcTestRunFileDir();
+    std::optional<std::string> runfile_dir = grpc::GetGrpcTestRunFileDir();
     if (runfile_dir.has_value()) {
       test_records_path = absl::StrJoin({*runfile_dir, test_records_path}, "/");
       dns_server_path = absl::StrJoin({*runfile_dir, dns_server_path}, "/");
@@ -129,9 +128,8 @@ class EventEngineDNSTest : public EventEngineTest {
 // an indication whether the test is running on RBE or not. Find a better way of
 // doing this.
 #ifndef GRPC_PORT_ISOLATED_RUNTIME
-      gpr_log(GPR_ERROR,
-              "You are invoking the test locally with Bazel, you may need to "
-              "invoke Bazel with --enable_runfiles=yes.");
+      LOG(ERROR) << "You are invoking the test locally with Bazel, you may "
+                    "need to invoke Bazel with --enable_runfiles=yes.";
 #endif  // GRPC_PORT_ISOLATED_RUNTIME
       test_records_path = grpc::testing::NormalizeFilePath(test_records_path);
       dns_server_path =
@@ -183,7 +181,7 @@ class EventEngineDNSTest : public EventEngineTest {
   }
 
   static void TearDownTestSuite() {
-#ifndef GRPC_IOS_EVENT_ENGINE_CLIENT
+#if !GRPC_IOS_EVENT_ENGINE_CLIENT
     dns_server_.server_process->Interrupt();
     dns_server_.server_process->Join();
     delete dns_server_.server_process;
@@ -234,7 +232,7 @@ class EventEngineDNSTest : public EventEngineTest {
 EventEngineDNSTest::DNSServer EventEngineDNSTest::dns_server_;
 
 // TODO(hork): implement XFAIL for resolvers that don't support TXT or SRV
-#ifndef GRPC_IOS_EVENT_ENGINE_CLIENT
+#if !GRPC_IOS_EVENT_ENGINE_CLIENT
 
 TEST_F(EventEngineDNSTest, QueryNXHostname) {
   SKIP_TEST_FOR_NATIVE_DNS_RESOLVER();
@@ -435,7 +433,7 @@ TEST_F(EventEngineDNSTest, LocalHost) {
   auto dns_resolver = CreateDNSResolverWithoutSpecifyingServer();
   dns_resolver->LookupHostname(
       [this](auto result) {
-#ifdef GRPC_IOS_EVENT_ENGINE_CLIENT
+#if GRPC_IOS_EVENT_ENGINE_CLIENT
         EXPECT_SUCCESS();
 #else
         EXPECT_TRUE(result.ok());
@@ -558,7 +556,7 @@ TEST_F(EventEngineDNSTest, InvalidIPv6Addresses) {
                        &dns_resolver_signal_, "[2001:db8::11111]:1");
 }
 
-void TestUnparseableHostPort(
+void TestUnparsableHostPort(
     std::unique_ptr<EventEngine::DNSResolver> dns_resolver,
     grpc_core::Notification* barrier, absl::string_view target) {
   dns_resolver->LookupHostname(
@@ -570,38 +568,38 @@ void TestUnparseableHostPort(
   barrier->WaitForNotification();
 }
 
-TEST_F(EventEngineDNSTest, UnparseableHostPortsOnlyBracket) {
-  TestUnparseableHostPort(CreateDNSResolverWithoutSpecifyingServer(),
-                          &dns_resolver_signal_, "[");
+TEST_F(EventEngineDNSTest, UnparsableHostPortsOnlyBracket) {
+  TestUnparsableHostPort(CreateDNSResolverWithoutSpecifyingServer(),
+                         &dns_resolver_signal_, "[");
 }
 
-TEST_F(EventEngineDNSTest, UnparseableHostPortsMissingRightBracket) {
-  TestUnparseableHostPort(CreateDNSResolverWithoutSpecifyingServer(),
-                          &dns_resolver_signal_, "[::1");
+TEST_F(EventEngineDNSTest, UnparsableHostPortsMissingRightBracket) {
+  TestUnparsableHostPort(CreateDNSResolverWithoutSpecifyingServer(),
+                         &dns_resolver_signal_, "[::1");
 }
 
-TEST_F(EventEngineDNSTest, UnparseableHostPortsBadPort) {
-  TestUnparseableHostPort(CreateDNSResolverWithoutSpecifyingServer(),
-                          &dns_resolver_signal_, "[::1]bad");
+TEST_F(EventEngineDNSTest, UnparsableHostPortsBadPort) {
+  TestUnparsableHostPort(CreateDNSResolverWithoutSpecifyingServer(),
+                         &dns_resolver_signal_, "[::1]bad");
 }
 
-TEST_F(EventEngineDNSTest, UnparseableHostPortsBadIPv6) {
-  TestUnparseableHostPort(CreateDNSResolverWithoutSpecifyingServer(),
-                          &dns_resolver_signal_, "[1.2.3.4]");
+TEST_F(EventEngineDNSTest, UnparsableHostPortsBadIPv6) {
+  TestUnparsableHostPort(CreateDNSResolverWithoutSpecifyingServer(),
+                         &dns_resolver_signal_, "[1.2.3.4]");
 }
 
-TEST_F(EventEngineDNSTest, UnparseableHostPortsBadLocalhost) {
-  TestUnparseableHostPort(CreateDNSResolverWithoutSpecifyingServer(),
-                          &dns_resolver_signal_, "[localhost]");
+TEST_F(EventEngineDNSTest, UnparsableHostPortsBadLocalhost) {
+  TestUnparsableHostPort(CreateDNSResolverWithoutSpecifyingServer(),
+                         &dns_resolver_signal_, "[localhost]");
 }
 
-TEST_F(EventEngineDNSTest, UnparseableHostPortsBadLocalhostWithPort) {
-  TestUnparseableHostPort(CreateDNSResolverWithoutSpecifyingServer(),
-                          &dns_resolver_signal_, "[localhost]:1");
+TEST_F(EventEngineDNSTest, UnparsableHostPortsBadLocalhostWithPort) {
+  TestUnparsableHostPort(CreateDNSResolverWithoutSpecifyingServer(),
+                         &dns_resolver_signal_, "[localhost]:1");
 }
 
-TEST_F(EventEngineDNSTest, UnparseableHostPortsEmptyHostname) {
-  TestUnparseableHostPort(CreateDNSResolverWithoutSpecifyingServer(),
-                          &dns_resolver_signal_, ":443");
+TEST_F(EventEngineDNSTest, UnparsableHostPortsEmptyHostname) {
+  TestUnparsableHostPort(CreateDNSResolverWithoutSpecifyingServer(),
+                         &dns_resolver_signal_, ":443");
 }
 // END

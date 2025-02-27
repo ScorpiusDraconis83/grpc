@@ -17,20 +17,19 @@
 #include "test/cpp/end2end/xds/xds_server.h"
 
 #include <deque>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
 #include <vector>
 
-#include "absl/types/optional.h"
-
-#include <grpc/support/log.h>
-
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "src/core/lib/address_utils/parse_address.h"
-#include "src/core/lib/gprpp/crash.h"
-#include "src/core/lib/gprpp/sync.h"
+#include "src/core/util/crash.h"
+#include "src/core/util/sync.h"
 #include "src/proto/grpc/testing/xds/v3/ads.grpc.pb.h"
-#include "src/proto/grpc/testing/xds/v3/discovery.grpc.pb.h"
+#include "src/proto/grpc/testing/xds/v3/discovery.pb.h"
 #include "src/proto/grpc/testing/xds/v3/lrs.grpc.pb.h"
 
 namespace grpc {
@@ -50,10 +49,9 @@ void AdsServiceImpl::SetResource(google::protobuf::Any resource,
   resource_state.resource_type_version =
       resource_type_state.resource_type_version;
   resource_state.resource = std::move(resource);
-  gpr_log(GPR_INFO,
-          "ADS[%p]: Updating %s resource %s; resource_type_version now %u",
-          this, type_url.c_str(), name.c_str(),
-          resource_type_state.resource_type_version);
+  LOG(INFO) << "ADS[" << debug_label_ << "]: Updating " << type_url
+            << " resource " << name << "; resource_type_version now "
+            << resource_type_state.resource_type_version;
   for (SubscriptionState* subscription : resource_state.subscriptions) {
     subscription->update_queue->emplace_back(type_url, name);
   }
@@ -68,10 +66,9 @@ void AdsServiceImpl::UnsetResource(const std::string& type_url,
   resource_state.resource_type_version =
       resource_type_state.resource_type_version;
   resource_state.resource.reset();
-  gpr_log(GPR_INFO,
-          "ADS[%p]: Unsetting %s resource %s; resource_type_version now %u",
-          this, type_url.c_str(), name.c_str(),
-          resource_type_state.resource_type_version);
+  LOG(INFO) << "ADS[" << debug_label_ << "]: Unsetting " << type_url
+            << " resource " << name << "; resource_type_version now "
+            << resource_type_state.resource_type_version;
   for (SubscriptionState* subscription : resource_state.subscriptions) {
     subscription->update_queue->emplace_back(type_url, name);
   }
@@ -100,9 +97,9 @@ bool AdsServiceImpl::MaybeSubscribe(const std::string& resource_type,
   if (subscription_state->update_queue != nullptr) return false;
   subscription_state->update_queue = update_queue;
   resource_state->subscriptions.emplace(subscription_state);
-  gpr_log(GPR_INFO, "ADS[%p]: subscribe to resource type %s name %s state %p",
-          this, resource_type.c_str(), resource_name.c_str(),
-          &subscription_state);
+  LOG(INFO) << "ADS[" << debug_label_ << "]: subscribe to resource type "
+            << resource_type << " name " << resource_name << " state "
+            << &subscription_state;
   return true;
 }
 
@@ -115,17 +112,17 @@ void AdsServiceImpl::ProcessUnsubscriptions(
     ResourceNameMap* resource_name_map) {
   for (auto it = subscription_name_map->begin();
        it != subscription_name_map->end();) {
-    const std::string& resource_name = it->first;
-    SubscriptionState& subscription_state = it->second;
+    auto& [resource_name, subscription_state] = *it;
     if (resources_in_current_request.find(resource_name) !=
         resources_in_current_request.end()) {
       ++it;
       continue;
     }
-    gpr_log(GPR_INFO, "ADS[%p]: Unsubscribe to type=%s name=%s state=%p", this,
-            resource_type.c_str(), resource_name.c_str(), &subscription_state);
+    LOG(INFO) << "ADS[" << debug_label_
+              << "]: Unsubscribe to type=" << resource_type
+              << " name=" << resource_name << " state=" << &subscription_state;
     auto resource_it = resource_name_map->find(resource_name);
-    GPR_ASSERT(resource_it != resource_name_map->end());
+    CHECK(resource_it != resource_name_map->end());
     auto& resource_state = resource_it->second;
     resource_state.subscriptions.erase(&subscription_state);
     if (resource_state.subscriptions.empty() &&
@@ -150,7 +147,7 @@ void AdsServiceImpl::Shutdown() {
     }
     resource_type_response_state_.clear();
   }
-  gpr_log(GPR_INFO, "ADS[%p]: shut down", this);
+  LOG(INFO) << "ADS[" << debug_label_ << "]: shut down";
 }
 
 //
@@ -159,32 +156,32 @@ void AdsServiceImpl::Shutdown() {
 
 uint64_t LrsServiceImpl::ClientStats::total_successful_requests() const {
   uint64_t sum = 0;
-  for (auto& p : locality_stats_) {
-    sum += p.second.total_successful_requests;
+  for (auto& [_, stats] : locality_stats_) {
+    sum += stats.total_successful_requests;
   }
   return sum;
 }
 
 uint64_t LrsServiceImpl::ClientStats::total_requests_in_progress() const {
   uint64_t sum = 0;
-  for (auto& p : locality_stats_) {
-    sum += p.second.total_requests_in_progress;
+  for (auto& [_, stats] : locality_stats_) {
+    sum += stats.total_requests_in_progress;
   }
   return sum;
 }
 
 uint64_t LrsServiceImpl::ClientStats::total_error_requests() const {
   uint64_t sum = 0;
-  for (auto& p : locality_stats_) {
-    sum += p.second.total_error_requests;
+  for (auto& [_, stats] : locality_stats_) {
+    sum += stats.total_error_requests;
   }
   return sum;
 }
 
 uint64_t LrsServiceImpl::ClientStats::total_issued_requests() const {
   uint64_t sum = 0;
-  for (auto& p : locality_stats_) {
-    sum += p.second.total_issued_requests;
+  for (auto& [_, stats] : locality_stats_) {
+    sum += stats.total_issued_requests;
   }
   return sum;
 }
@@ -192,18 +189,18 @@ uint64_t LrsServiceImpl::ClientStats::total_issued_requests() const {
 uint64_t LrsServiceImpl::ClientStats::dropped_requests(
     const std::string& category) const {
   auto iter = dropped_requests_.find(category);
-  GPR_ASSERT(iter != dropped_requests_.end());
+  CHECK(iter != dropped_requests_.end());
   return iter->second;
 }
 
 LrsServiceImpl::ClientStats& LrsServiceImpl::ClientStats::operator+=(
     const ClientStats& other) {
-  for (const auto& p : other.locality_stats_) {
-    locality_stats_[p.first] += p.second;
+  for (const auto& [name, stats] : other.locality_stats_) {
+    locality_stats_[name] += stats;
   }
   total_dropped_requests_ += other.total_dropped_requests_;
-  for (const auto& p : other.dropped_requests_) {
-    dropped_requests_[p.first] += p.second;
+  for (const auto& [category, count] : other.dropped_requests_) {
+    dropped_requests_[category] += count;
   }
   return *this;
 }
@@ -231,7 +228,7 @@ void LrsServiceImpl::Shutdown() {
       lrs_cv_.SignalAll();
     }
   }
-  gpr_log(GPR_INFO, "LRS[%p]: shut down", this);
+  LOG(INFO) << "LRS[" << debug_label_ << "]: shut down";
 }
 
 std::vector<LrsServiceImpl::ClientStats> LrsServiceImpl::WaitForLoadReport(
@@ -243,7 +240,7 @@ std::vector<LrsServiceImpl::ClientStats> LrsServiceImpl::WaitForLoadReport(
     load_report_cond_ = &cv;
     while (result_queue_.empty()) {
       if (cv.WaitWithTimeout(&load_report_mu_, timeout)) {
-        gpr_log(GPR_ERROR, "timed out waiting for load report");
+        LOG(ERROR) << "timed out waiting for load report";
         return {};
       }
     }

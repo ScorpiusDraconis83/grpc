@@ -35,13 +35,13 @@ grpc_cc_library(
         "otel/api",
         "otel/sdk/src/metrics",
     ],
-    language = "C++",
     tags = [
     ],
     deps = [
         "//:grpc++",
         "//src/cpp/ext/otel:otel_plugin",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:fake_stats_plugin",
+        "//test/core/test_util:grpc_test_util",
         "//test/cpp/end2end:test_service_impl",
     ],
 )
@@ -56,13 +56,17 @@ grpc_cc_test(
         "otel/api",
         "otel/sdk/src/metrics",
     ],
-    language = "C++",
-    tags = [],
+    tags = [
+        # TODO(b/398739502): Remove after fixing
+        "grpc:broken-internally",
+        # TODO(b/332369798): Remove after fixing bug
+        "grpc:otel-namespace-calamity",
+    ],
     deps = [
         ":otel_test_library",
         "//:grpc++",
         "//src/cpp/ext/otel:otel_plugin",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
         "//test/cpp/end2end:test_service_impl",
     ],
 )

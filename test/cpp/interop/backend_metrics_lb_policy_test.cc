@@ -18,24 +18,23 @@
 
 #include "test/cpp/interop/backend_metrics_lb_policy.h"
 
-#include <memory>
-#include <thread>
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <grpc/grpc.h>
 #include <grpcpp/ext/call_metric_recorder.h>
 #include <grpcpp/ext/orca_service.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/support/status.h>
 
-#include "src/core/lib/config/config_vars.h"
-#include "src/core/lib/gprpp/sync.h"
+#include <memory>
+#include <thread>
+
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
+#include "src/core/config/config_vars.h"
+#include "src/core/util/sync.h"
 #include "src/proto/grpc/testing/messages.pb.h"
 #include "src/proto/grpc/testing/test.grpc.pb.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
 
 namespace grpc {
 namespace testing {
@@ -114,7 +113,7 @@ TEST(BackendMetricsLbPolicyTest, TestOobMetricsReceipt) {
   SimpleResponse res;
   grpc_core::Mutex mu;
   grpc_core::CondVar cond;
-  absl::optional<Status> status;
+  std::optional<Status> status;
 
   stub.async()->UnaryCall(&ctx, &req, &res, [&](auto s) {
     grpc_core::MutexLock lock(&mu);
@@ -124,7 +123,7 @@ TEST(BackendMetricsLbPolicyTest, TestOobMetricsReceipt) {
   // This report is sent on start, available immediately
   auto report = tracker.WaitForOobLoadReport(
       [](auto report) { return report.cpu_utilization() == 0.5; },
-      absl::Milliseconds(1500), 3);
+      absl::Seconds(5) * grpc_test_slowdown_factor(), 3);
   ASSERT_TRUE(report.has_value());
   EXPECT_EQ(report->cpu_utilization(), 0.5);
   for (size_t i = 0; i < 3; i++) {

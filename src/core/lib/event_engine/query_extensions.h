@@ -14,14 +14,12 @@
 #ifndef GRPC_SRC_CORE_LIB_EVENT_ENGINE_QUERY_EXTENSIONS_H
 #define GRPC_SRC_CORE_LIB_EVENT_ENGINE_QUERY_EXTENSIONS_H
 
+#include <grpc/event_engine/event_engine.h>
 #include <grpc/support/port_platform.h>
 
 #include "absl/strings/string_view.h"
 
-#include <grpc/event_engine/event_engine.h>
-
-namespace grpc_event_engine {
-namespace experimental {
+namespace grpc_event_engine::experimental {
 
 namespace endpoint_detail {
 
@@ -69,6 +67,7 @@ T* QueryExtension(EventEngine::Endpoint* endpoint) {
 /// supported by the listener.
 template <typename T>
 T* QueryExtension(EventEngine::Listener* listener) {
+  if (listener == nullptr) return nullptr;
   return static_cast<T*>(listener->QueryExtension(T::EndpointExtensionName()));
 }
 
@@ -76,10 +75,10 @@ T* QueryExtension(EventEngine::Listener* listener) {
 /// supported by the EventEngine.
 template <typename T>
 T* QueryExtension(EventEngine* engine) {
+  if (engine == nullptr) return nullptr;
   return static_cast<T*>(engine->QueryExtension(T::EndpointExtensionName()));
 }
 
-}  // namespace experimental
-}  // namespace grpc_event_engine
+}  // namespace grpc_event_engine::experimental
 
 #endif  // GRPC_SRC_CORE_LIB_EVENT_ENGINE_QUERY_EXTENSIONS_H

@@ -13,8 +13,7 @@
 // limitations under the License.
 
 #include "gmock/gmock.h"
-
-#include "test/core/transport/test_suite/test.h"
+#include "test/core/transport/test_suite/transport_test.h"
 
 using testing::UnorderedElementsAreArray;
 
@@ -62,22 +61,18 @@ void FillMetadata(const std::vector<std::pair<std::string, std::string>>& md,
 }  // namespace
 
 TRANSPORT_TEST(UnaryWithSomeContent) {
-  SetServerAcceptor();
-  auto initiator = CreateCall();
+  SetServerCallDestination();
   const auto client_initial_metadata = RandomMetadata();
   const auto server_initial_metadata = RandomMetadata();
   const auto server_trailing_metadata = RandomMetadata();
   const auto client_payload = RandomMessage();
   const auto server_payload = RandomMessage();
+  auto md = Arena::MakePooledForOverwrite<ClientMetadata>();
+  FillMetadata(client_initial_metadata, *md);
+  auto initiator = CreateCall(std::move(md));
   SpawnTestSeq(
       initiator, "initiator",
-      [&]() {
-        auto md = Arena::MakePooled<ClientMetadata>(GetContext<Arena>());
-        FillMetadata(client_initial_metadata, *md);
-        return initiator.PushClientInitialMetadata(std::move(md));
-      },
-      [&](StatusFlag status) mutable {
-        EXPECT_TRUE(status.ok());
+      [&]() mutable {
         return initiator.PushMessage(Arena::MakePooled<Message>(
             SliceBuffer(Slice::FromCopiedString(client_payload)), 0));
       },
@@ -86,28 +81,28 @@ TRANSPORT_TEST(UnaryWithSomeContent) {
         initiator.FinishSends();
         return initiator.PullServerInitialMetadata();
       },
-      [&](ValueOrFailure<absl::optional<ServerMetadataHandle>> md) {
+      [&](ValueOrFailure<std::optional<ServerMetadataHandle>> md) {
         EXPECT_TRUE(md.ok());
         EXPECT_TRUE(md.value().has_value());
         EXPECT_THAT(LowerMetadata(***md),
                     UnorderedElementsAreArray(server_initial_metadata));
         return initiator.PullMessage();
       },
-      [&](NextResult<MessageHandle> msg) {
+      [&](ServerToClientNextMessage msg) {
+        EXPECT_TRUE(msg.ok());
         EXPECT_TRUE(msg.has_value());
-        EXPECT_EQ(msg.value()->payload()->JoinIntoString(), server_payload);
+        EXPECT_EQ(msg.value().payload()->JoinIntoString(), server_payload);
         return initiator.PullMessage();
       },
-      [&](NextResult<MessageHandle> msg) {
+      [&](ServerToClientNextMessage msg) {
+        EXPECT_TRUE(msg.ok());
         EXPECT_FALSE(msg.has_value());
-        EXPECT_FALSE(msg.cancelled());
         return initiator.PullServerTrailingMetadata();
       },
       [&](ValueOrFailure<ServerMetadataHandle> md) {
         EXPECT_TRUE(md.ok());
         EXPECT_THAT(LowerMetadata(**md),
                     UnorderedElementsAreArray(server_trailing_metadata));
-        return Empty{};
       });
   auto handler = TickUntilServerCall();
   SpawnTestSeq(
@@ -118,15 +113,16 @@ TRANSPORT_TEST(UnaryWithSomeContent) {
                     UnorderedElementsAreArray(client_initial_metadata));
         return handler.PullMessage();
       },
-      [&](NextResult<MessageHandle> msg) {
+      [&](ClientToServerNextMessage msg) {
+        EXPECT_TRUE(msg.ok());
         EXPECT_TRUE(msg.has_value());
-        EXPECT_EQ(msg.value()->payload()->JoinIntoString(), client_payload);
+        EXPECT_EQ(msg.value().payload()->JoinIntoString(), client_payload);
         return handler.PullMessage();
       },
-      [&](NextResult<MessageHandle> msg) {
+      [&](ClientToServerNextMessage msg) {
+        EXPECT_TRUE(msg.ok());
         EXPECT_FALSE(msg.has_value());
-        EXPECT_FALSE(msg.cancelled());
-        auto md = Arena::MakePooled<ServerMetadata>(GetContext<Arena>());
+        auto md = Arena::MakePooledForOverwrite<ServerMetadata>();
         FillMetadata(server_initial_metadata, *md);
         return handler.PushServerInitialMetadata(std::move(md));
       },
@@ -137,13 +133,9 @@ TRANSPORT_TEST(UnaryWithSomeContent) {
       },
       [&](StatusFlag result) mutable {
         EXPECT_TRUE(result.ok());
-        auto md = Arena::MakePooled<ServerMetadata>(GetContext<Arena>());
+        auto md = Arena::MakePooledForOverwrite<ServerMetadata>();
         FillMetadata(server_trailing_metadata, *md);
-        return handler.PushServerTrailingMetadata(std::move(md));
-      },
-      [&](StatusFlag result) mutable {
-        EXPECT_TRUE(result.ok());
-        return Empty{};
+        handler.PushServerTrailingMetadata(std::move(md));
       });
   WaitForAllPendingWork();
 }

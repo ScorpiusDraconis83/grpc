@@ -16,6 +16,8 @@
 //
 //
 
+#include <grpc/grpc.h>
+#include <grpc/support/time.h>
 #include <signal.h>
 
 #include <chrono>
@@ -23,11 +25,8 @@
 #include <vector>
 
 #include "absl/flags/flag.h"
-
-#include <grpc/grpc.h>
-#include <grpc/support/time.h>
-
-#include "test/core/util/test_config.h"
+#include "src/core/telemetry/stats.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/qps/qps_worker.h"
 #include "test/cpp/util/test_config.h"
 #include "test/cpp/util/test_credentials_provider.h"
@@ -69,6 +68,7 @@ int main(int argc, char** argv) {
   signal(SIGINT, sigint_handler);
 
   grpc::testing::RunServer();
-
+  LOG(ERROR) << "Global Stats:\n"
+             << StatsAsJson(grpc_core::global_stats().Collect().get());
   return 0;
 }

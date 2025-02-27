@@ -15,16 +15,15 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <tuple>
 #include <utility>
 #include <vector>
 
 #include "absl/functional/any_invocable.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
-#include "absl/types/optional.h"
-
-#include <grpc/support/log.h>
-
+#include "fuzztest/fuzztest.h"
 #include "src/core/lib/promise/activity.h"
 #include "src/core/lib/promise/join.h"
 #include "src/core/lib/promise/map.h"
@@ -32,7 +31,6 @@
 #include "src/core/lib/promise/promise.h"
 #include "src/core/lib/promise/race.h"
 #include "src/core/lib/promise/seq.h"
-#include "src/libfuzzer/libfuzzer_macro.h"
 #include "test/core/promise/promise_fuzzer.pb.h"
 
 bool squelch = true;
@@ -64,10 +62,10 @@ class Fuzzer {
         Scheduler{this},
         [this](absl::Status status) {
           // Must only be called once
-          GPR_ASSERT(!done_);
+          CHECK(!done_);
           // If we became certain of the eventual status, verify it.
           if (expected_status_.has_value()) {
-            GPR_ASSERT(status == *expected_status_);
+            CHECK(status == *expected_status_);
           }
           // Mark ourselves done.
           done_ = true;
@@ -114,7 +112,7 @@ class Fuzzer {
     ExpectCancelled();
     activity_.reset();
     if (wakeup_ != nullptr) std::exchange(wakeup_, nullptr)();
-    GPR_ASSERT(done_);
+    CHECK(done_);
   }
 
  private:
@@ -127,9 +125,8 @@ class Fuzzer {
       explicit BoundScheduler(Scheduler scheduler)
           : fuzzer_(scheduler.fuzzer) {}
       void ScheduleWakeup() {
-        GPR_ASSERT(static_cast<ActivityType*>(this) ==
-                   fuzzer_->activity_.get());
-        GPR_ASSERT(fuzzer_->wakeup_ == nullptr);
+        CHECK(static_cast<ActivityType*>(this) == fuzzer_->activity_.get());
+        CHECK(fuzzer_->wakeup_ == nullptr);
         fuzzer_->wakeup_ = [this]() {
           static_cast<ActivityType*>(this)->RunScheduledWakeup();
         };
@@ -326,16 +323,15 @@ class Fuzzer {
   std::function<void()> wakeup_;
   // If we are certain of the final status, then that. Otherwise, nullopt if we
   // don't know.
-  absl::optional<absl::Status> expected_status_;
+  std::optional<absl::Status> expected_status_;
   // Has on_done been called?
   bool done_ = false;
   // Wakers that may be scheduled
   std::map<int, std::vector<Waker>> wakers_;
 };
+
+void Run(promise_fuzzer::Msg msg) { Fuzzer().Run(msg); }
+FUZZ_TEST(PromiseFuzzer, Run);
+
 }  // namespace
-
 }  // namespace grpc_core
-
-DEFINE_PROTO_FUZZER(const promise_fuzzer::Msg& msg) {
-  grpc_core::Fuzzer().Run(msg);
-}

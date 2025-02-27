@@ -16,14 +16,13 @@
 //
 //
 
-#include <grpc/support/port_platform.h>
-
 #include "src/core/client_channel/local_subchannel_pool.h"
+
+#include <grpc/support/port_platform.h>
 
 #include <utility>
 
-#include <grpc/support/log.h>
-
+#include "absl/log/check.h"
 #include "src/core/client_channel/subchannel.h"
 
 namespace grpc_core {
@@ -34,7 +33,7 @@ RefCountedPtr<Subchannel> LocalSubchannelPool::RegisterSubchannel(
   // Because this pool is only accessed under the client channel's work
   // serializer, and because FindSubchannel is checked before invoking
   // RegisterSubchannel, no such subchannel should exist in the map.
-  GPR_ASSERT(it == subchannel_map_.end());
+  CHECK(it == subchannel_map_.end());
   subchannel_map_[key] = constructed.get();
   return constructed;
 }
@@ -45,8 +44,8 @@ void LocalSubchannelPool::UnregisterSubchannel(const SubchannelKey& key,
   // Because this subchannel pool is accessed only under the client
   // channel's work serializer, any subchannel created by RegisterSubchannel
   // will be deleted from the map in UnregisterSubchannel.
-  GPR_ASSERT(it != subchannel_map_.end());
-  GPR_ASSERT(it->second == subchannel);
+  CHECK(it != subchannel_map_.end());
+  CHECK(it->second == subchannel);
   subchannel_map_.erase(it);
 }
 

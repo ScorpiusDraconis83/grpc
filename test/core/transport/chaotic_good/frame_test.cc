@@ -16,11 +16,11 @@
 
 #include <cstdint>
 
+#include "absl/log/check.h"
 #include "absl/random/random.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "gtest/gtest.h"
-
 #include "src/core/lib/resource_quota/memory_quota.h"
 #include "src/core/lib/resource_quota/resource_quota.h"
 
@@ -28,33 +28,20 @@ namespace grpc_core {
 namespace chaotic_good {
 namespace {
 
-FrameLimits TestFrameLimits() { return FrameLimits{1024 * 1024 * 1024, 63}; }
-
 template <typename T>
 void AssertRoundTrips(const T& input, FrameType expected_frame_type) {
-  HPackCompressor hpack_compressor;
-  auto serialized = input.Serialize(&hpack_compressor);
-  GPR_ASSERT(serialized.control.Length() >=
-             24);  // Initial output buffer size is 64 byte.
-  uint8_t header_bytes[24];
-  serialized.control.MoveFirstNBytesIntoBuffer(24, header_bytes);
-  auto header = FrameHeader::Parse(header_bytes);
-  if (!header.ok()) {
-    Crash("Failed to parse header");
-  }
-  GPR_ASSERT(header->type == expected_frame_type);
+  const auto hdr = input.MakeHeader();
+  EXPECT_EQ(hdr.type, expected_frame_type);
+  // Frames should always set connection id 0, though the transport may adjust
+  // it.
+  EXPECT_EQ(hdr.payload_connection_id, 0);
+  SliceBuffer output_buffer;
+  input.SerializePayload(output_buffer);
+  EXPECT_EQ(hdr.payload_length, output_buffer.Length());
   T output;
-  HPackParser hpack_parser;
-  absl::BitGen bitgen;
-  MemoryAllocator allocator = MakeResourceQuota("test-quota")
-                                  ->memory_quota()
-                                  ->CreateMemoryAllocator("test-allocator");
-  ScopedArenaPtr arena = MakeScopedArena(1024, &allocator);
-  auto deser =
-      output.Deserialize(&hpack_parser, header.value(), absl::BitGenRef(bitgen),
-                         arena.get(), std::move(serialized), TestFrameLimits());
-  GPR_ASSERT(deser.ok());
-  GPR_ASSERT(output == input);
+  auto deser = output.Deserialize(hdr, std::move(output_buffer));
+  CHECK_OK(deser);
+  CHECK_EQ(output.ToString(), input.ToString());
 }
 
 TEST(FrameTest, SettingsFrameRoundTrips) {

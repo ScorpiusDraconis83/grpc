@@ -14,10 +14,14 @@
 // limitations under the License.
 //
 
-#include <grpc/support/port_platform.h>
-
 #include "src/core/load_balancing/oob_backend_metric.h"
 
+#include <grpc/impl/connectivity_state.h>
+#include <grpc/slice.h>
+#include <grpc/status.h>
+#include <grpc/support/alloc.h>
+#include <grpc/support/port_platform.h>
+#include <grpc/support/time.h>
 #include <string.h>
 
 #include <algorithm>
@@ -25,48 +29,39 @@
 #include <utility>
 #include <vector>
 
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 #include "google/protobuf/duration.upb.h"
-#include "upb/mem/arena.hpp"
-#include "xds/service/orca/v3/orca.upb.h"
-
-#include <grpc/impl/connectivity_state.h>
-#include <grpc/slice.h>
-#include <grpc/status.h>
-#include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
-#include <grpc/support/time.h>
-
-#include "src/core/client_channel/backend_metric.h"
-#include "src/core/client_channel/client_channel_channelz.h"
-#include "src/core/load_balancing/oob_backend_metric_internal.h"
+#include "src/core/channelz/channel_trace.h"
 #include "src/core/client_channel/subchannel.h"
 #include "src/core/client_channel/subchannel_stream_client.h"
-#include "src/core/lib/channel/channel_trace.h"
 #include "src/core/lib/debug/trace.h"
-#include "src/core/lib/gprpp/debug_location.h"
-#include "src/core/lib/gprpp/memory.h"
-#include "src/core/lib/gprpp/orphanable.h"
-#include "src/core/lib/gprpp/ref_counted_ptr.h"
-#include "src/core/lib/gprpp/sync.h"
-#include "src/core/lib/gprpp/time.h"
 #include "src/core/lib/iomgr/closure.h"
 #include "src/core/lib/iomgr/error.h"
 #include "src/core/lib/iomgr/exec_ctx.h"
 #include "src/core/lib/iomgr/iomgr_fwd.h"
 #include "src/core/lib/iomgr/pollset_set.h"
 #include "src/core/lib/slice/slice.h"
+#include "src/core/load_balancing/backend_metric_parser.h"
+#include "src/core/load_balancing/oob_backend_metric_internal.h"
+#include "src/core/util/debug_location.h"
+#include "src/core/util/memory.h"
+#include "src/core/util/orphanable.h"
+#include "src/core/util/ref_counted_ptr.h"
+#include "src/core/util/sync.h"
+#include "src/core/util/time.h"
+#include "upb/mem/arena.hpp"
+#include "xds/service/orca/v3/orca.upb.h"
 
 namespace grpc_core {
-
-TraceFlag grpc_orca_client_trace(false, "orca_client");
 
 //
 // OrcaProducer::ConnectivityWatcher
 //
 
-class OrcaProducer::ConnectivityWatcher
+class OrcaProducer::ConnectivityWatcher final
     : public Subchannel::ConnectivityStateWatcherInterface {
  public:
   explicit ConnectivityWatcher(WeakRefCountedPtr<OrcaProducer> producer)
@@ -97,7 +92,7 @@ class OrcaProducer::ConnectivityWatcher
 // OrcaProducer::OrcaStreamEventHandler
 //
 
-class OrcaProducer::OrcaStreamEventHandler
+class OrcaProducer::OrcaStreamEventHandler final
     : public SubchannelStreamClient::CallEventHandler {
  public:
   OrcaStreamEventHandler(WeakRefCountedPtr<OrcaProducer> producer,
@@ -150,7 +145,7 @@ class OrcaProducer::OrcaStreamEventHandler
     if (status == GRPC_STATUS_UNIMPLEMENTED) {
       static const char kErrorMessage[] =
           "Orca stream returned UNIMPLEMENTED; disabling";
-      gpr_log(GPR_ERROR, kErrorMessage);
+      LOG(ERROR) << kErrorMessage;
       auto* channelz_node = producer_->subchannel_->channelz_node();
       if (channelz_node != nullptr) {
         channelz_node->AddTraceEvent(
@@ -168,7 +163,7 @@ class OrcaProducer::OrcaStreamEventHandler
   // notifications, which avoids lock inversion problems due to
   // acquiring producer_->mu_ while holding the lock from inside of
   // SubchannelStreamClient.
-  class BackendMetricAllocator : public BackendMetricAllocatorInterface {
+  class BackendMetricAllocator final : public BackendMetricAllocatorInterface {
    public:
     explicit BackendMetricAllocator(WeakRefCountedPtr<OrcaProducer> producer)
         : producer_(std::move(producer)) {}
@@ -221,12 +216,12 @@ void OrcaProducer::Start(RefCountedPtr<Subchannel> subchannel) {
   subchannel_->WatchConnectivityState(std::move(connectivity_watcher));
 }
 
-void OrcaProducer::Orphan() {
+void OrcaProducer::Orphaned() {
   {
     MutexLock lock(&mu_);
     stream_client_.reset();
   }
-  GPR_ASSERT(subchannel_ != nullptr);  // Should not be called before Start().
+  CHECK(subchannel_ != nullptr);  // Should not be called before Start().
   subchannel_->CancelConnectivityStateWatch(connectivity_watcher_);
   subchannel_->RemoveDataProducer(this);
 }
@@ -272,15 +267,13 @@ void OrcaProducer::MaybeStartStreamLocked() {
       connected_subchannel_, subchannel_->pollset_set(),
       std::make_unique<OrcaStreamEventHandler>(
           WeakRefAsSubclass<OrcaProducer>(), report_interval_),
-      GRPC_TRACE_FLAG_ENABLED(grpc_orca_client_trace) ? "OrcaClient" : nullptr);
+      GRPC_TRACE_FLAG_ENABLED(orca_client) ? "OrcaClient" : nullptr);
 }
 
 void OrcaProducer::NotifyWatchers(
     const BackendMetricData& backend_metric_data) {
-  if (GRPC_TRACE_FLAG_ENABLED(grpc_orca_client_trace)) {
-    gpr_log(GPR_INFO, "OrcaProducer %p: reporting backend metrics to watchers",
-            this);
-  }
+  GRPC_TRACE_LOG(orca_client, INFO)
+      << "OrcaProducer " << this << ": reporting backend metrics to watchers";
   MutexLock lock(&mu_);
   for (OrcaWatcher* watcher : watchers_) {
     watcher->watcher()->OnBackendMetricReport(backend_metric_data);
