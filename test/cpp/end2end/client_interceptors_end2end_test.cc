@@ -16,13 +16,6 @@
 //
 //
 
-#include <memory>
-#include <vector>
-
-#include <gtest/gtest.h>
-
-#include "absl/memory/memory.h"
-
 #include <grpcpp/channel.h>
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
@@ -35,10 +28,16 @@
 #include <grpcpp/server_posix.h>
 #include <grpcpp/support/client_interceptor.h>
 
+#include <memory>
+#include <vector>
+
+#include "absl/log/check.h"
+#include "absl/memory/memory.h"
+#include "gtest/gtest.h"
 #include "src/core/lib/iomgr/port.h"
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/end2end/interceptors_util.h"
 #include "test/cpp/end2end/test_service_impl.h"
 #include "test/cpp/util/byte_buffer_proto_helper.h"
@@ -127,9 +126,8 @@ class HijackingInterceptor : public experimental::Interceptor {
       auto* map = methods->GetRecvTrailingMetadata();
       bool found = false;
       // Check that we received the metadata as an echo
-      for (const auto& pair : *map) {
-        found = pair.first.starts_with("testkey") &&
-                pair.second.starts_with("testvalue");
+      for (const auto& [key, value] : *map) {
+        found = key.starts_with("testkey") && value.starts_with("testvalue");
         if (found) break;
       }
       EXPECT_EQ(found, true);
@@ -154,7 +152,7 @@ class HijackingInterceptor : public experimental::Interceptor {
       auto* map = methods->GetRecvTrailingMetadata();
       // insert the metadata that we want
       EXPECT_EQ(map->size(), 0);
-      map->insert(std::make_pair("testkey", "testvalue"));
+      map->insert(std::pair("testkey", "testvalue"));
       auto* status = methods->GetRecvStatus();
       *status = Status(StatusCode::OK, "");
     }
@@ -248,9 +246,8 @@ class HijackingInterceptorMakesAnotherCall : public experimental::Interceptor {
       auto* map = methods->GetRecvTrailingMetadata();
       bool found = false;
       // Check that we received the metadata as an echo
-      for (const auto& pair : *map) {
-        found = pair.first.starts_with("testkey") &&
-                pair.second.starts_with("testvalue");
+      for (const auto& [key, value] : *map) {
+        found = key.starts_with("testkey") && value.starts_with("testvalue");
         if (found) break;
       }
       EXPECT_EQ(found, true);
@@ -275,7 +272,7 @@ class HijackingInterceptorMakesAnotherCall : public experimental::Interceptor {
       auto* map = methods->GetRecvTrailingMetadata();
       // insert the metadata that we want
       EXPECT_EQ(map->size(), 0);
-      map->insert(std::make_pair("testkey", "testvalue"));
+      map->insert(std::pair("testkey", "testvalue"));
       auto* status = methods->GetRecvStatus();
       *status = Status(StatusCode::OK, "");
     }
@@ -356,7 +353,7 @@ class BidiStreamingRpcHijackingInterceptor : public experimental::Interceptor {
       auto* map = methods->GetRecvTrailingMetadata();
       // insert the metadata that we want
       EXPECT_EQ(map->size(), 0);
-      map->insert(std::make_pair("testkey", "testvalue"));
+      map->insert(std::pair("testkey", "testvalue"));
       auto* status = methods->GetRecvStatus();
       *status = Status(StatusCode::OK, "");
     }
@@ -472,9 +469,8 @@ class ServerStreamingRpcHijackingInterceptor
       auto* map = methods->GetRecvTrailingMetadata();
       bool found = false;
       // Check that we received the metadata as an echo
-      for (const auto& pair : *map) {
-        found = pair.first.starts_with("testkey") &&
-                pair.second.starts_with("testvalue");
+      for (const auto& [key, value] : *map) {
+        found = key.starts_with("testkey") && value.starts_with("testvalue");
         if (found) break;
       }
       EXPECT_EQ(found, true);
@@ -501,7 +497,7 @@ class ServerStreamingRpcHijackingInterceptor
       auto* map = methods->GetRecvTrailingMetadata();
       // insert the metadata that we want
       EXPECT_EQ(map->size(), 0);
-      map->insert(std::make_pair("testkey", "testvalue"));
+      map->insert(std::pair("testkey", "testvalue"));
       auto* status = methods->GetRecvStatus();
       *status = Status(StatusCode::OK, "");
     }
@@ -620,9 +616,8 @@ class LoggingInterceptor : public experimental::Interceptor {
       auto* map = methods->GetRecvTrailingMetadata();
       bool found = false;
       // Check that we received the metadata as an echo
-      for (const auto& pair : *map) {
-        found = pair.first.starts_with("testkey") &&
-                pair.second.starts_with("testvalue");
+      for (const auto& [key, value] : *map) {
+        found = key.starts_with("testkey") && value.starts_with("testvalue");
         if (found) break;
       }
       EXPECT_EQ(found, true);
@@ -759,15 +754,13 @@ class ParameterizedClientInterceptorsEnd2endTest
 #ifdef GRPC_POSIX_SOCKET
     else if (GetParam().channel_type() == ChannelType::kFdChannel) {
       int flags;
-      GPR_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv_) == 0);
+      CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv_), 0);
       flags = fcntl(sv_[0], F_GETFL, 0);
-      GPR_ASSERT(fcntl(sv_[0], F_SETFL, flags | O_NONBLOCK) == 0);
+      CHECK_EQ(fcntl(sv_[0], F_SETFL, flags | O_NONBLOCK), 0);
       flags = fcntl(sv_[1], F_GETFL, 0);
-      GPR_ASSERT(fcntl(sv_[1], F_SETFL, flags | O_NONBLOCK) == 0);
-      GPR_ASSERT(grpc_set_socket_no_sigpipe_if_possible(sv_[0]) ==
-                 absl::OkStatus());
-      GPR_ASSERT(grpc_set_socket_no_sigpipe_if_possible(sv_[1]) ==
-                 absl::OkStatus());
+      CHECK_EQ(fcntl(sv_[1], F_SETFL, flags | O_NONBLOCK), 0);
+      CHECK(grpc_set_socket_no_sigpipe_if_possible(sv_[0]) == absl::OkStatus());
+      CHECK(grpc_set_socket_no_sigpipe_if_possible(sv_[1]) == absl::OkStatus());
       server_ = builder.BuildAndStart();
       AddInsecureChannelFromFd(server_.get(), sv_[1]);
     }
@@ -1262,6 +1255,6 @@ int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   int ret = RUN_ALL_TESTS();
   // Make sure that gRPC shuts down cleanly
-  GPR_ASSERT(grpc_wait_until_shutdown(10));
+  CHECK(grpc_wait_until_shutdown(10));
   return ret;
 }

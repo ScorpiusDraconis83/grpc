@@ -27,12 +27,15 @@ licenses(["notice"])
 grpc_cc_binary(
     name = "low_level_ping_pong",
     srcs = ["low_level_ping_pong.cc"],
-    language = "C++",
+    external_deps = [
+        "absl/log:check",
+        "absl/log:log",
+    ],
     tags = ["no_windows"],
     deps = [
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
-        "//test/core/util:grpc_test_util_base",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util_base",
     ],
 )

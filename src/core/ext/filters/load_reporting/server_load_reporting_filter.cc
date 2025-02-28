@@ -16,52 +16,50 @@
 //
 //
 
-#include <grpc/support/port_platform.h>
-
 #include "src/core/ext/filters/load_reporting/server_load_reporting_filter.h"
 
+#include <grpc/grpc_security.h>
+#include <grpc/impl/channel_arg_names.h>
+#include <grpc/status.h>
+#include <grpc/support/port_platform.h>
+#include <grpc/support/time.h>
 #include <stdint.h>
 #include <stdlib.h>
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
 #include "absl/container/inlined_vector.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "opencensus/stats/stats.h"
 #include "opencensus/tags/tag_key.h"
-
-#include <grpc/grpc_security.h>
-#include <grpc/impl/channel_arg_names.h>
-#include <grpc/status.h>
-#include <grpc/support/log.h>
-#include <grpc/support/time.h>
-
+#include "src/core/config/core_configuration.h"
 #include "src/core/ext/filters/load_reporting/registered_opencensus_objects.h"
 #include "src/core/lib/address_utils/parse_address.h"
 #include "src/core/lib/channel/call_finalization.h"
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/channel/channel_fwd.h"
 #include "src/core/lib/channel/channel_stack.h"
-#include "src/core/lib/config/core_configuration.h"
 #include "src/core/lib/iomgr/resolved_address.h"
 #include "src/core/lib/iomgr/sockaddr.h"
 #include "src/core/lib/iomgr/socket_utils.h"
 #include "src/core/lib/promise/context.h"
 #include "src/core/lib/promise/promise.h"
 #include "src/core/lib/promise/seq.h"
-#include "src/core/lib/security/context/security_context.h"
 #include "src/core/lib/slice/slice.h"
 #include "src/core/lib/surface/channel_stack_type.h"
 #include "src/core/lib/transport/metadata_batch.h"
-#include "src/core/lib/uri/uri_parser.h"
+#include "src/core/transport/auth_context.h"
+#include "src/core/util/latent_see.h"
+#include "src/core/util/uri.h"
 #include "src/cpp/server/load_reporter/constants.h"
 
 // IWYU pragma: no_include "opencensus/stats/recording.h"
@@ -72,14 +70,11 @@ constexpr char kEncodedIpv4AddressLengthString[] = "08";
 constexpr char kEncodedIpv6AddressLengthString[] = "32";
 constexpr char kEmptyAddressLengthString[] = "00";
 
-const NoInterceptor ServerLoadReportingFilter::Call::OnServerInitialMetadata;
-const NoInterceptor ServerLoadReportingFilter::Call::OnClientToServerMessage;
-const NoInterceptor ServerLoadReportingFilter::Call::OnServerToClientMessage;
-
-absl::StatusOr<ServerLoadReportingFilter> ServerLoadReportingFilter::Create(
-    const ChannelArgs& channel_args, ChannelFilter::Args) {
+absl::StatusOr<std::unique_ptr<ServerLoadReportingFilter>>
+ServerLoadReportingFilter::Create(const ChannelArgs& channel_args,
+                                  ChannelFilter::Args) {
   // Find and record the peer_identity.
-  ServerLoadReportingFilter filter;
+  auto filter = std::make_unique<ServerLoadReportingFilter>();
   const auto* auth_context = channel_args.GetObject<grpc_auth_context>();
   if (auth_context != nullptr &&
       grpc_auth_context_peer_is_authenticated(auth_context)) {
@@ -88,7 +83,7 @@ absl::StatusOr<ServerLoadReportingFilter> ServerLoadReportingFilter::Create(
     const grpc_auth_property* auth_property =
         grpc_auth_property_iterator_next(&auth_it);
     if (auth_property != nullptr) {
-      filter.peer_identity_ =
+      filter->peer_identity_ =
           std::string(auth_property->value, auth_property->value_length);
     }
   }
@@ -101,26 +96,23 @@ std::string GetCensusSafeClientIpString(
   // Find the client URI string.
   const Slice* client_uri_slice = initial_metadata.get_pointer(PeerString());
   if (client_uri_slice == nullptr) {
-    gpr_log(GPR_ERROR,
-            "Unable to extract client URI string (peer string) from gRPC "
-            "metadata.");
+    LOG(ERROR) << "Unable to extract client URI string (peer string) from gRPC "
+                  "metadata.";
     return "";
   }
   absl::StatusOr<URI> client_uri =
       URI::Parse(client_uri_slice->as_string_view());
   if (!client_uri.ok()) {
-    gpr_log(GPR_ERROR,
-            "Unable to parse the client URI string (peer string) to a client "
-            "URI. Error: %s",
-            client_uri.status().ToString().c_str());
+    LOG(ERROR) << "Unable to parse the client URI string (peer string) to a "
+                  "client URI. Error: "
+               << client_uri.status();
     return "";
   }
   // Parse the client URI into grpc_resolved_address.
   grpc_resolved_address resolved_address;
   bool success = grpc_parse_uri(*client_uri, &resolved_address);
   if (!success) {
-    gpr_log(GPR_ERROR,
-            "Unable to parse client URI into a grpc_resolved_address.");
+    LOG(ERROR) << "Unable to parse client URI into a grpc_resolved_address.";
     return "";
   }
   // Convert the socket address in the grpc_resolved_address into a hex string
@@ -182,6 +174,8 @@ const char* GetStatusTagForStatus(grpc_status_code status) {
 
 void ServerLoadReportingFilter::Call::OnClientInitialMetadata(
     ClientMetadata& md, ServerLoadReportingFilter* filter) {
+  GRPC_LATENT_SEE_INNER_SCOPE(
+      "ServerLoadReportingFilter::Call::OnClientInitialMetadata");
   // Gather up basic facts about the request
   Slice service_method;
   if (const Slice* path = md.get_pointer(HttpPathMetadata())) {
@@ -206,6 +200,8 @@ void ServerLoadReportingFilter::Call::OnClientInitialMetadata(
 
 void ServerLoadReportingFilter::Call::OnServerTrailingMetadata(
     ServerMetadata& md, ServerLoadReportingFilter* filter) {
+  GRPC_LATENT_SEE_INNER_SCOPE(
+      "ServerLoadReportingFilter::Call::OnServerTrailingMetadata");
   const auto& costs = md.Take(LbCostBinMetadata());
   for (const auto& cost : costs) {
     opencensus::stats::Record(
@@ -223,6 +219,7 @@ void ServerLoadReportingFilter::Call::OnServerTrailingMetadata(
 
 void ServerLoadReportingFilter::Call::OnFinalize(
     const grpc_call_final_info* final_info, ServerLoadReportingFilter* filter) {
+  GRPC_LATENT_SEE_INNER_SCOPE("ServerLoadReportingFilter::Call::OnFinalize");
   if (final_info == nullptr) return;
   // After the last bytes have been placed on the wire we record
   // final measurements
@@ -245,8 +242,8 @@ void ServerLoadReportingFilter::Call::OnFinalize(
 }
 
 const grpc_channel_filter ServerLoadReportingFilter::kFilter =
-    MakePromiseBasedFilter<ServerLoadReportingFilter, FilterEndpoint::kServer>(
-        "server_load_reporting");
+    MakePromiseBasedFilter<ServerLoadReportingFilter,
+                           FilterEndpoint::kServer>();
 
 // TODO(juanlishen): We should register the filter during grpc initialization
 // time once OpenCensus is compatible with our build system. For now, we force

@@ -16,6 +16,13 @@
 //
 //
 
+#include <google/protobuf/text_format.h>
+#include <grpc/credentials.h>
+#include <grpc/event_engine/event_engine.h>
+#include <grpc/grpc.h>
+#include <grpc/grpc_security.h>
+#include <grpc/support/alloc.h>
+#include <grpc/support/string_util.h>
 #include <string.h>
 
 #include <algorithm>
@@ -23,33 +30,26 @@
 #include <functional>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
-
-#include <grpc/event_engine/event_engine.h>
-#include <grpc/grpc.h>
-#include <grpc/grpc_security.h>
-#include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
-#include <grpc/support/string_util.h>
-
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
+#include "fuzztest/fuzztest.h"
+#include "gtest/gtest.h"
 #include "src/core/ext/transport/inproc/inproc_transport.h"
 #include "src/core/lib/address_utils/parse_address.h"
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/event_engine/default_event_engine.h"
 #include "src/core/lib/experiments/config.h"
-#include "src/core/lib/gprpp/debug_location.h"
-#include "src/core/lib/gprpp/env.h"
-#include "src/core/lib/gprpp/ref_counted_ptr.h"
-#include "src/core/lib/gprpp/time.h"
 #include "src/core/lib/iomgr/closure.h"
 #include "src/core/lib/iomgr/exec_ctx.h"
 #include "src/core/lib/iomgr/iomgr_fwd.h"
@@ -57,24 +57,21 @@
 #include "src/core/lib/iomgr/resolved_address.h"
 #include "src/core/resolver/dns/c_ares/grpc_ares_wrapper.h"
 #include "src/core/resolver/endpoint_addresses.h"
-#include "src/libfuzzer/libfuzzer_macro.h"
+#include "src/core/util/debug_location.h"
+#include "src/core/util/env.h"
+#include "src/core/util/ref_counted_ptr.h"
+#include "src/core/util/time.h"
 #include "test/core/end2end/data/ssl_test_data.h"
 #include "test/core/end2end/fuzzers/api_fuzzer.pb.h"
 #include "test/core/end2end/fuzzers/fuzzing_common.h"
 #include "test/core/event_engine/fuzzing_event_engine/fuzzing_event_engine.h"
 #include "test/core/event_engine/fuzzing_event_engine/fuzzing_event_engine.pb.h"
-#include "test/core/util/fuzz_config_vars.h"
-#include "test/core/util/fuzzing_channel_args.h"
+#include "test/core/test_util/fuzz_config_vars.h"
+#include "test/core/test_util/fuzz_config_vars_helpers.h"
+#include "test/core/test_util/fuzzing_channel_args.h"
+#include "test/core/test_util/test_config.h"
 
 // IWYU pragma: no_include <google/protobuf/repeated_ptr_field.h>
-
-////////////////////////////////////////////////////////////////////////////////
-// logging
-
-bool squelch = true;
-bool leak_check = true;
-
-static void dont_log(gpr_log_func_args* /*args*/) {}
 
 ////////////////////////////////////////////////////////////////////////////////
 // dns resolution
@@ -89,8 +86,7 @@ static void finish_resolve(addr_req r) {
   if (0 == strcmp(r.addr, "server")) {
     *r.addresses = std::make_unique<grpc_core::EndpointAddressesList>();
     grpc_resolved_address fake_resolved_address;
-    GPR_ASSERT(
-        grpc_parse_ipv4_hostport("1.2.3.4:5", &fake_resolved_address, false));
+    CHECK(grpc_parse_ipv4_hostport("1.2.3.4:5", &fake_resolved_address, false));
     (*r.addresses)
         ->emplace_back(fake_resolved_address, grpc_core::ChannelArgs());
     grpc_core::ExecCtx::Run(DEBUG_LOCATION, r.on_done, absl::OkStatus());
@@ -115,12 +111,11 @@ class FuzzerDNSResolver : public grpc_core::DNSResolver {
         std::function<void(absl::StatusOr<std::vector<grpc_resolved_address>>)>
             on_done)
         : name_(std::string(name)), on_done_(std::move(on_done)) {
-      GetDefaultEventEngine()->RunAfter(
-          grpc_core::Duration::Seconds(1), [this] {
-            grpc_core::ApplicationCallbackExecCtx callback_exec_ctx;
-            grpc_core::ExecCtx exec_ctx;
-            FinishResolve();
-          });
+      GetDefaultEventEngine()->RunAfter(grpc_core::Duration::Seconds(1),
+                                        [this] {
+                                          grpc_core::ExecCtx exec_ctx;
+                                          FinishResolve();
+                                        });
     }
 
    private:
@@ -157,9 +152,18 @@ class FuzzerDNSResolver : public grpc_core::DNSResolver {
   }
 
   absl::StatusOr<std::vector<grpc_resolved_address>> LookupHostnameBlocking(
-      absl::string_view /* name */,
-      absl::string_view /* default_port */) override {
-    GPR_ASSERT(0);
+      absl::string_view name, absl::string_view default_port) override {
+    // To mimic the resolution delay
+    absl::SleepFor(absl::Seconds(1));
+    if (name == "server") {
+      std::vector<grpc_resolved_address> addrs;
+      grpc_resolved_address addr;
+      memset(&addr, 0, sizeof(addr));
+      addrs.push_back(addr);
+      return addrs;
+    } else {
+      return absl::UnknownError("Resolution failed");
+    }
   }
 
   TaskHandle LookupSRV(
@@ -169,7 +173,6 @@ class FuzzerDNSResolver : public grpc_core::DNSResolver {
       grpc_pollset_set* /* interested_parties */,
       absl::string_view /* name_server */) override {
     engine_->Run([on_resolved] {
-      grpc_core::ApplicationCallbackExecCtx app_exec_ctx;
       grpc_core::ExecCtx exec_ctx;
       on_resolved(absl::UnimplementedError(
           "The Fuzzing DNS resolver does not support looking up SRV records"));
@@ -184,7 +187,6 @@ class FuzzerDNSResolver : public grpc_core::DNSResolver {
       absl::string_view /* name_server */) override {
     // Not supported
     engine_->Run([on_resolved] {
-      grpc_core::ApplicationCallbackExecCtx app_exec_ctx;
       grpc_core::ExecCtx exec_ctx;
       on_resolved(absl::UnimplementedError(
           "The Fuzing DNS resolver does not support looking up TXT records"));
@@ -201,7 +203,7 @@ class FuzzerDNSResolver : public grpc_core::DNSResolver {
 
 }  // namespace
 
-grpc_ares_request* my_dns_lookup_ares(
+grpc_ares_request* my_dns_lookup_hostname_ares(
     const char* /*dns_server*/, const char* addr, const char* /*default_port*/,
     grpc_pollset_set* /*interested_parties*/, grpc_closure* on_done,
     std::unique_ptr<grpc_core::EndpointAddressesList>* addresses,
@@ -211,7 +213,22 @@ grpc_ares_request* my_dns_lookup_ares(
   r.on_done = on_done;
   r.addresses = addresses;
   GetDefaultEventEngine()->RunAfter(grpc_core::Duration::Seconds(1), [r] {
-    grpc_core::ApplicationCallbackExecCtx callback_exec_ctx;
+    grpc_core::ExecCtx exec_ctx;
+    finish_resolve(r);
+  });
+  return nullptr;
+}
+
+grpc_ares_request* my_dns_lookup_srv_ares(
+    const char* /*dns_server*/, const char* name,
+    grpc_pollset_set* /*interested_parties*/, grpc_closure* on_done,
+    std::unique_ptr<grpc_core::EndpointAddressesList>* balancer_addresses,
+    int /*query_timeout*/) {
+  addr_req r;
+  r.addr = gpr_strdup(name);
+  r.on_done = on_done;
+  r.addresses = balancer_addresses;
+  GetDefaultEventEngine()->RunAfter(grpc_core::Duration::Seconds(1), [r] {
     grpc_core::ExecCtx exec_ctx;
     finish_resolve(r);
   });
@@ -219,7 +236,7 @@ grpc_ares_request* my_dns_lookup_ares(
 }
 
 static void my_cancel_ares_request(grpc_ares_request* request) {
-  GPR_ASSERT(request == nullptr);
+  CHECK_NE(request, nullptr);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -388,17 +405,18 @@ namespace testing {
 
 ApiFuzzer::ApiFuzzer(const fuzzing_event_engine::Actions& actions)
     : BasicFuzzer(actions) {
-  ResetDNSResolver(std::make_unique<FuzzerDNSResolver>(engine()));
-  grpc_dns_lookup_hostname_ares = my_dns_lookup_ares;
+  ResetDNSResolver(std::make_unique<FuzzerDNSResolver>(engine().get()));
+  grpc_dns_lookup_hostname_ares = my_dns_lookup_hostname_ares;
+  grpc_dns_lookup_srv_ares = my_dns_lookup_srv_ares;
   grpc_cancel_ares_request = my_cancel_ares_request;
 
-  GPR_ASSERT(channel_ == nullptr);
-  GPR_ASSERT(server_ == nullptr);
+  CHECK_EQ(channel_, nullptr);
+  CHECK_EQ(server_, nullptr);
 }
 
 ApiFuzzer::~ApiFuzzer() {
-  GPR_ASSERT(channel_ == nullptr);
-  GPR_ASSERT(server_ == nullptr);
+  CHECK_EQ(channel_, nullptr);
+  CHECK_EQ(server_, nullptr);
 }
 
 void ApiFuzzer::Tick() {
@@ -446,7 +464,7 @@ ApiFuzzer::Result ApiFuzzer::CreateChannel(
                             creds, args.ToC().get());
     grpc_channel_credentials_release(creds);
   }
-  GPR_ASSERT(channel_ != nullptr);
+  CHECK_NE(channel_, nullptr);
   channel_force_delete_ = false;
   return Result::kComplete;
 }
@@ -461,7 +479,7 @@ ApiFuzzer::Result ApiFuzzer::CreateServer(
     ChannelArgs args = testing::CreateChannelArgsFromFuzzingConfiguration(
         create_server.channel_args(), fuzzing_env);
     server_ = grpc_server_create(args.ToC().get(), nullptr);
-    GPR_ASSERT(server_ != nullptr);
+    CHECK_NE(server_, nullptr);
     grpc_server_register_completion_queue(server_, cq(), nullptr);
     for (const auto& http2_port : create_server.http2_ports()) {
       auto* creds = ReadServerCreds(http2_port.server_creds());
@@ -487,16 +505,64 @@ void ApiFuzzer::DestroyChannel() {
   channel_ = nullptr;
 }
 
-}  // namespace testing
-}  // namespace grpc_core
-
-using grpc_core::testing::ApiFuzzer;
-
-DEFINE_PROTO_FUZZER(const api_fuzzer::Msg& msg) {
-  if (squelch && !grpc_core::GetEnv("GRPC_TRACE_FUZZER").has_value()) {
-    gpr_set_log_function(dont_log);
-  }
-  grpc_core::ApplyFuzzConfigVars(msg.config_vars());
-  grpc_core::TestOnlyReloadExperimentsFromConfigVariables();
+void RunApiFuzzer(const api_fuzzer::Msg& msg) {
+  ApplyFuzzConfigVars(msg.config_vars());
+  TestOnlyReloadExperimentsFromConfigVariables();
   ApiFuzzer(msg.event_engine_actions()).Run(msg.actions());
 }
+FUZZ_TEST(MyTestSuite, RunApiFuzzer)
+    .WithDomains(::fuzztest::Arbitrary<api_fuzzer::Msg>().WithProtobufField(
+        "config_vars", AnyConfigVars()));
+
+auto ParseTestProto(const std::string& proto) {
+  api_fuzzer::Msg msg;
+  CHECK(google::protobuf::TextFormat::ParseFromString(proto, &msg));
+  return msg;
+}
+
+TEST(MyTestSuite, RunApiFuzzerRegression1) {
+  RunApiFuzzer(ParseTestProto(
+      R"pb(actions { create_server {} }
+           actions { shutdown_server {} }
+           actions { create_channel { inproc: true } }
+           actions {
+             create_call {
+               method { value: "\364\217\277\277" }
+               host { value: ")" }
+             }
+           }
+      )pb"));
+}
+
+TEST(MyTestSuite, RunApiFuzzerRegression2) {
+  RunApiFuzzer(ParseTestProto(
+      R"pb(actions { create_server { http2_ports { server_creds {} } } }
+           actions { request_call {} }
+           actions {
+             create_channel {
+               channel_args {}
+               inproc: true
+             }
+           }
+           actions {
+             create_call {
+               method { value: "\364\217\277\277\355\237\277" }
+               timeout: -1482173017
+             }
+           }
+           actions { poll_cq {} }
+           actions {
+             queue_batch {
+               operations {
+                 send_status_from_server {
+                   status_code: 4294967295
+                   status_details { value: "_" }
+                 }
+               }
+             }
+           }
+      )pb"));
+}
+
+}  // namespace testing
+}  // namespace grpc_core

@@ -23,12 +23,16 @@ grpc_cc_binary(
     srcs = [
         "close_fd_test.cc",
     ],
-    language = "C++",
+    external_deps = [
+        "absl/log:check",
+        "absl/log:log",
+    ],
     tags = ["no_windows"],
     deps = [
         "//:gpr",
         "//:grpc",
+        "//:server",
         "//src/core:channel_args",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )

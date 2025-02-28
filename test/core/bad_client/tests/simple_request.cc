@@ -14,16 +14,36 @@
 
 #include <grpc/grpc.h>
 #include <grpc/slice.h>
-#include <grpc/support/log.h>
 
-#include "src/core/lib/surface/server.h"
+#include "absl/log/check.h"
+#include "src/core/server/server.h"
 #include "test/core/bad_client/bad_client.h"
 #include "test/core/end2end/cq_verifier.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/test_config.h"
 
 #define PFX_STR                                                            \
   "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"                                       \
   "\x00\x00\x00\x04\x00\x00\x00\x00\x00" /* settings frame */              \
+  "\x00\x00\xc9\x01\x04\x00\x00\x00\x01" /* headers: generated from        \
+                                            simple_request.headers in this \
+                                            directory */                   \
+  "\x10\x05:path\x08/foo/bar"                                              \
+  "\x10\x07:scheme\x04http"                                                \
+  "\x10\x07:method\x04POST"                                                \
+  "\x10\x0a:authority\x09localhost"                                        \
+  "\x10\x0c"                                                               \
+  "content-type\x10"                                                       \
+  "application/grpc"                                                       \
+  "\x10\x14grpc-accept-encoding\x15"                                       \
+  "deflate,identity,gzip"                                                  \
+  "\x10\x02te\x08trailers"                                                 \
+  "\x10\x0auser-agent\"bad-client grpc-c/0.12.0.0 (linux)"
+
+#define ONE_SETTING_HDR              \
+  "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" \
+  "\x00\x00\x06\x04\x00\x00\x00\x00\x00" /* settings frame */
+
+#define USUAL_HDR                                                          \
   "\x00\x00\xc9\x01\x04\x00\x00\x00\x01" /* headers: generated from        \
                                             simple_request.headers in this \
                                             directory */                   \
@@ -116,12 +136,12 @@ static void verifier(grpc_server* server, grpc_completion_queue* cq,
   error = grpc_server_request_call(server, &s, &call_details,
                                    &request_metadata_recv, cq, cq,
                                    grpc_core::CqVerifier::tag(101));
-  GPR_ASSERT(GRPC_CALL_OK == error);
+  CHECK_EQ(error, GRPC_CALL_OK);
   cqv.Expect(grpc_core::CqVerifier::tag(101), true);
   cqv.Verify();
 
-  GPR_ASSERT(0 == grpc_slice_str_cmp(call_details.host, "localhost"));
-  GPR_ASSERT(0 == grpc_slice_str_cmp(call_details.method, "/foo/bar"));
+  CHECK_EQ(grpc_slice_str_cmp(call_details.host, "localhost"), 0);
+  CHECK_EQ(grpc_slice_str_cmp(call_details.method, "/foo/bar"), 0);
 
   grpc_metadata_array_destroy(&request_metadata_recv);
   grpc_call_details_destroy(&call_details);
@@ -144,12 +164,12 @@ static void VerifyRpcDoesNotGetCanceled(grpc_server* server,
   error = grpc_server_request_call(server, &s, &call_details,
                                    &request_metadata_recv, cq, cq,
                                    grpc_core::CqVerifier::tag(101));
-  GPR_ASSERT(GRPC_CALL_OK == error);
+  CHECK_EQ(error, GRPC_CALL_OK);
   cqv.Expect(grpc_core::CqVerifier::tag(101), true);
   cqv.Verify();
 
-  GPR_ASSERT(0 == grpc_slice_str_cmp(call_details.host, "localhost"));
-  GPR_ASSERT(0 == grpc_slice_str_cmp(call_details.method, "/foo/bar"));
+  CHECK_EQ(grpc_slice_str_cmp(call_details.host, "localhost"), 0);
+  CHECK_EQ(grpc_slice_str_cmp(call_details.method, "/foo/bar"), 0);
 
   grpc_op* op;
   grpc_op ops[6];
@@ -176,13 +196,13 @@ static void VerifyRpcDoesNotGetCanceled(grpc_server* server,
   op++;
   error = grpc_call_start_batch(s, ops, static_cast<size_t>(op - ops),
                                 grpc_core::CqVerifier::tag(103), nullptr);
-  GPR_ASSERT(GRPC_CALL_OK == error);
+  CHECK_EQ(error, GRPC_CALL_OK);
 
   cqv.Expect(grpc_core::CqVerifier::tag(103), true);
   cqv.Verify();
 
   // If the call had an error, `was_cancelled` would be 1.
-  // GPR_ASSERT(was_cancelled == 1);
+  // CHECK_EQ(was_cancelled, 1);
 
   grpc_metadata_array_destroy(&request_metadata_recv);
   grpc_call_details_destroy(&call_details);
@@ -192,9 +212,9 @@ static void VerifyRpcDoesNotGetCanceled(grpc_server* server,
 static void failure_verifier(grpc_server* server, grpc_completion_queue* cq,
                              void* /*registered_method*/) {
   while (grpc_core::Server::FromC(server)->HasOpenConnections()) {
-    GPR_ASSERT(grpc_completion_queue_next(
-                   cq, grpc_timeout_milliseconds_to_deadline(20), nullptr)
-                   .type == GRPC_QUEUE_TIMEOUT);
+    CHECK(grpc_completion_queue_next(
+              cq, grpc_timeout_milliseconds_to_deadline(20), nullptr)
+              .type == GRPC_QUEUE_TIMEOUT);
   }
 }
 
@@ -219,7 +239,6 @@ int main(int argc, char** argv) {
                            "\x00\x00\x05\x00\x00\x00\x00\x00\x01"
                            "\x34\x00\x00\x00\x00",
                            0);
-
   // push a data frame with bad flags
   GRPC_RUN_BAD_CLIENT_TEST(verifier, nullptr,
                            PFX_STR "\x00\x00\x00\x00\x02\x00\x00\x00\x01", 0);
@@ -235,6 +254,22 @@ int main(int argc, char** argv) {
                            "\x00\x00\x04\x08\x00\x00\x00\x00\x01"
                            "\x00\x00\x00\x00",
                            0);
+  // push a valid secure frame with payload "hello" and setting
+  // `allow_security_frame` enabled, frame should be parsed
+  GRPC_RUN_BAD_CLIENT_TEST(
+      verifier, nullptr,
+      ONE_SETTING_HDR
+      "\xFE\x05\x00\x00\x00\x01" USUAL_HDR
+      "\x00\x00\x05\xC8\x00\x00\x00\x00\x00\x68\x65\x6C\x6C\x6F",
+      0);
+  // push a valid secure frame with payload "hello" and setting
+  // `allow_security_frame` disabled, frame should be ignored
+  GRPC_RUN_BAD_CLIENT_TEST(
+      VerifyRpcDoesNotGetCanceled, nullptr,
+      ONE_SETTING_HDR
+      "\xFE\x05\x00\x00\x00\x00" USUAL_HDR
+      "\x00\x00\x05\xC8\x00\x00\x00\x00\x00\x68\x65\x6C\x6C\x6F",
+      0);
   // push a short goaway
   GRPC_RUN_BAD_CLIENT_TEST(failure_verifier, nullptr,
                            PFX_STR "\x00\x00\x04\x07\x00\x00\x00\x00\x00", 0);

@@ -14,44 +14,43 @@
 // limitations under the License.
 //
 
+#include <grpc/support/json.h>
 #include <grpc/support/port_platform.h>
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <type_traits>
 #include <utility>
 
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
-#include "absl/types/optional.h"
-
-#include <grpc/support/json.h>
-#include <grpc/support/log.h>
-
-#include "src/core/ext/gcp/metadata_query.h"
-#include "src/core/ext/xds/xds_bootstrap.h"
-#include "src/core/ext/xds/xds_client_grpc.h"
+#include "src/core/config/core_configuration.h"
+#include "src/core/credentials/transport/alts/check_gcp_environment.h"
 #include "src/core/lib/channel/channel_args.h"
-#include "src/core/lib/config/core_configuration.h"
-#include "src/core/lib/gprpp/debug_location.h"
-#include "src/core/lib/gprpp/env.h"
-#include "src/core/lib/gprpp/orphanable.h"
-#include "src/core/lib/gprpp/ref_counted_ptr.h"
-#include "src/core/lib/gprpp/time.h"
-#include "src/core/lib/gprpp/work_serializer.h"
 #include "src/core/lib/iomgr/polling_entity.h"
-#include "src/core/lib/json/json.h"
-#include "src/core/lib/json/json_writer.h"
+#include "src/core/lib/resource_quota/resource_quota.h"
 #include "src/core/resolver/resolver.h"
 #include "src/core/resolver/resolver_factory.h"
 #include "src/core/resolver/resolver_registry.h"
-#include "src/core/lib/resource_quota/resource_quota.h"
-#include "src/core/lib/security/credentials/alts/check_gcp_environment.h"
-#include "src/core/lib/uri/uri_parser.h"
+#include "src/core/util/debug_location.h"
+#include "src/core/util/env.h"
+#include "src/core/util/gcp_metadata_query.h"
+#include "src/core/util/json/json.h"
+#include "src/core/util/json/json_writer.h"
+#include "src/core/util/orphanable.h"
+#include "src/core/util/ref_counted_ptr.h"
+#include "src/core/util/time.h"
+#include "src/core/util/uri.h"
+#include "src/core/util/work_serializer.h"
+#include "src/core/xds/grpc/xds_client_grpc.h"
+#include "src/core/xds/xds_client/xds_bootstrap.h"
 
 namespace grpc_core {
 
@@ -59,7 +58,7 @@ namespace {
 
 const char* kC2PAuthority = "traffic-director-c2p.xds.googleapis.com";
 
-class GoogleCloud2ProdResolver : public Resolver {
+class GoogleCloud2ProdResolver final : public Resolver {
  public:
   explicit GoogleCloud2ProdResolver(ResolverArgs args);
 
@@ -81,11 +80,11 @@ class GoogleCloud2ProdResolver : public Resolver {
   std::string metadata_server_name_ = "metadata.google.internal.";
   bool shutdown_ = false;
 
-  OrphanablePtr<MetadataQuery> zone_query_;
-  absl::optional<std::string> zone_;
+  OrphanablePtr<GcpMetadataQuery> zone_query_;
+  std::optional<std::string> zone_;
 
-  OrphanablePtr<MetadataQuery> ipv6_query_;
-  absl::optional<bool> supports_ipv6_;
+  OrphanablePtr<GcpMetadataQuery> ipv6_query_;
+  std::optional<bool> supports_ipv6_;
 };
 
 //
@@ -123,11 +122,11 @@ GoogleCloud2ProdResolver::GoogleCloud2ProdResolver(ResolverArgs args)
         CoreConfiguration::Get().resolver_registry().CreateResolver(
             absl::StrCat("dns:", name_to_resolve), args.args, args.pollset_set,
             work_serializer_, std::move(args.result_handler));
-    GPR_ASSERT(child_resolver_ != nullptr);
+    CHECK(child_resolver_ != nullptr);
     return;
   }
   // Maybe override metadata server name for testing
-  absl::optional<std::string> test_only_metadata_server_override =
+  std::optional<std::string> test_only_metadata_server_override =
       args.args.GetOwnedString(
           "grpc.testing.google_c2p_resolver_metadata_server_override");
   if (test_only_metadata_server_override.has_value() &&
@@ -142,7 +141,7 @@ GoogleCloud2ProdResolver::GoogleCloud2ProdResolver(ResolverArgs args)
   child_resolver_ = CoreConfiguration::Get().resolver_registry().CreateResolver(
       xds_uri, args.args, args.pollset_set, work_serializer_,
       std::move(args.result_handler));
-  GPR_ASSERT(child_resolver_ != nullptr);
+  CHECK(child_resolver_ != nullptr);
 }
 
 void GoogleCloud2ProdResolver::StartLocked() {
@@ -151,22 +150,20 @@ void GoogleCloud2ProdResolver::StartLocked() {
     return;
   }
   // Using xDS.  Start metadata server queries.
-  zone_query_ = MakeOrphanable<MetadataQuery>(
-      metadata_server_name_, std::string(MetadataQuery::kZoneAttribute),
+  zone_query_ = MakeOrphanable<GcpMetadataQuery>(
+      metadata_server_name_, std::string(GcpMetadataQuery::kZoneAttribute),
       &pollent_,
       [resolver = RefAsSubclass<GoogleCloud2ProdResolver>()](
           std::string /* attribute */,
           absl::StatusOr<std::string> result) mutable {
-        resolver->work_serializer_->Run(
-            [resolver, result = std::move(result)]() mutable {
-              resolver->ZoneQueryDone(result.ok() ? std::move(result).value()
-                                                  : "");
-            },
-            DEBUG_LOCATION);
+        resolver->work_serializer_->Run([resolver,
+                                         result = std::move(result)]() mutable {
+          resolver->ZoneQueryDone(result.ok() ? std::move(result).value() : "");
+        });
       },
       Duration::Seconds(10));
-  ipv6_query_ = MakeOrphanable<MetadataQuery>(
-      metadata_server_name_, std::string(MetadataQuery::kIPv6Attribute),
+  ipv6_query_ = MakeOrphanable<GcpMetadataQuery>(
+      metadata_server_name_, std::string(GcpMetadataQuery::kIPv6Attribute),
       &pollent_,
       [resolver = RefAsSubclass<GoogleCloud2ProdResolver>()](
           std::string /* attribute */,
@@ -178,8 +175,7 @@ void GoogleCloud2ProdResolver::StartLocked() {
               // servers in the wild, which can in some cases return 200
               // plus an empty result when they should have returned 404.
               resolver->IPv6QueryDone(result.ok() && !result->empty());
-            },
-            DEBUG_LOCATION);
+            });
       },
       Duration::Seconds(10));
 }
@@ -276,13 +272,13 @@ void GoogleCloud2ProdResolver::StartXdsResolver() {
 // Factory
 //
 
-class GoogleCloud2ProdResolverFactory : public ResolverFactory {
+class GoogleCloud2ProdResolverFactory final : public ResolverFactory {
  public:
   absl::string_view scheme() const override { return "google-c2p"; }
 
   bool IsValidUri(const URI& uri) const override {
     if (GPR_UNLIKELY(!uri.authority().empty())) {
-      gpr_log(GPR_ERROR, "google-c2p URI scheme does not support authorities");
+      LOG(ERROR) << "google-c2p URI scheme does not support authorities";
       return false;
     }
     return true;
@@ -296,7 +292,8 @@ class GoogleCloud2ProdResolverFactory : public ResolverFactory {
 
 // TODO(apolcyn): remove this class after user code has updated to the
 // stable "google-c2p" URI scheme.
-class ExperimentalGoogleCloud2ProdResolverFactory : public ResolverFactory {
+class ExperimentalGoogleCloud2ProdResolverFactory final
+    : public ResolverFactory {
  public:
   absl::string_view scheme() const override {
     return "google-c2p-experimental";
@@ -304,9 +301,8 @@ class ExperimentalGoogleCloud2ProdResolverFactory : public ResolverFactory {
 
   bool IsValidUri(const URI& uri) const override {
     if (GPR_UNLIKELY(!uri.authority().empty())) {
-      gpr_log(
-          GPR_ERROR,
-          "google-c2p-experimental URI scheme does not support authorities");
+      LOG(ERROR) << "google-c2p-experimental URI scheme does not support "
+                    "authorities";
       return false;
     }
     return true;

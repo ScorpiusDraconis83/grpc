@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <grpc/status.h>
+#include <grpc/support/time.h>
+
 #include <functional>
 #include <memory>
 #include <string>
@@ -23,23 +26,12 @@
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "gtest/gtest.h"
-
-#include <grpc/status.h>
-#include <grpc/support/log.h>
-#include <grpc/support/time.h>
-
-#include "src/core/lib/channel/call_tracer.h"
+#include "src/core/config/core_configuration.h"
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/channel/channel_fwd.h"
 #include "src/core/lib/channel/channel_stack.h"
-#include "src/core/lib/channel/context.h"
 #include "src/core/lib/channel/promise_based_filter.h"
-#include "src/core/lib/channel/tcp_tracer.h"
-#include "src/core/lib/config/core_configuration.h"
 #include "src/core/lib/experiments/experiments.h"
-#include "src/core/lib/gprpp/notification.h"
-#include "src/core/lib/gprpp/sync.h"
-#include "src/core/lib/gprpp/time.h"
 #include "src/core/lib/iomgr/error.h"
 #include "src/core/lib/promise/arena_promise.h"
 #include "src/core/lib/promise/context.h"
@@ -49,19 +41,109 @@
 #include "src/core/lib/surface/channel_stack_type.h"
 #include "src/core/lib/transport/metadata_batch.h"
 #include "src/core/lib/transport/transport.h"
+#include "src/core/telemetry/call_tracer.h"
+#include "src/core/telemetry/metrics.h"
+#include "src/core/telemetry/tcp_tracer.h"
+#include "src/core/util/notification.h"
+#include "src/core/util/sync.h"
+#include "src/core/util/time.h"
 #include "test/core/end2end/end2end_tests.h"
+#include "test/core/test_util/fake_stats_plugin.h"
 
 namespace grpc_core {
 namespace {
 
-Mutex* g_mu;
-Notification* g_client_call_ended_notify;
-Notification* g_server_call_ended_notify;
+class TestState {
+ public:
+  explicit TestState(CoreEnd2endTest* test)
+      : client_call_ended_(test), server_call_ended_(test) {}
+
+  void NotifyClient() { client_call_ended_.Notify(); }
+
+  void NotifyServer() { server_call_ended_.Notify(); }
+
+  void WaitForClient() {
+    EXPECT_TRUE(
+        client_call_ended_.WaitForNotificationWithTimeout(absl::Seconds(5)));
+  }
+
+  void WaitForServer() {
+    EXPECT_TRUE(
+        server_call_ended_.WaitForNotificationWithTimeout(absl::Seconds(5)));
+  }
+
+  void ResetClientByteSizes(
+      CallTracerInterface::TransportByteSize incoming = {},
+      CallTracerInterface::TransportByteSize outgoing = {}) {
+    MutexLock lock(&mu_);
+    client_incoming_bytes_ = incoming;
+    client_outgoing_bytes_ = outgoing;
+  }
+
+  void IncrementClientIncomingBytes(
+      CallTracerInterface::TransportByteSize bytes) {
+    MutexLock lock(&mu_);
+    client_incoming_bytes_ += bytes;
+  }
+
+  void IncrementClientOutgoingBytes(
+      CallTracerInterface::TransportByteSize bytes) {
+    MutexLock lock(&mu_);
+    client_outgoing_bytes_ += bytes;
+  }
+
+  void ResetServerByteSizes(
+      CallTracerInterface::TransportByteSize incoming = {},
+      CallTracerInterface::TransportByteSize outgoing = {}) {
+    MutexLock lock(&mu_);
+    server_incoming_bytes_ = incoming;
+    server_outgoing_bytes_ = outgoing;
+  }
+
+  void IncrementServerIncomingBytes(
+      CallTracerInterface::TransportByteSize bytes) {
+    MutexLock lock(&mu_);
+    server_incoming_bytes_ += bytes;
+  }
+
+  void IncrementServerOutgoingBytes(
+      CallTracerInterface::TransportByteSize bytes) {
+    MutexLock lock(&mu_);
+    server_outgoing_bytes_ += bytes;
+  }
+
+  std::tuple<CallTracerInterface::TransportByteSize,
+             CallTracerInterface::TransportByteSize,
+             CallTracerInterface::TransportByteSize,
+             CallTracerInterface::TransportByteSize>
+  ByteSizes() {
+    MutexLock lock(&mu_);
+    return std::tuple(client_incoming_bytes_, client_outgoing_bytes_,
+                      server_incoming_bytes_, server_outgoing_bytes_);
+  }
+
+ private:
+  Mutex mu_;
+  CoreEnd2endTest::TestNotification client_call_ended_;
+  CoreEnd2endTest::TestNotification server_call_ended_;
+  CallTracerInterface::TransportByteSize client_incoming_bytes_
+      ABSL_GUARDED_BY(mu_);
+  CallTracerInterface::TransportByteSize client_outgoing_bytes_
+      ABSL_GUARDED_BY(mu_);
+  CallTracerInterface::TransportByteSize server_incoming_bytes_
+      ABSL_GUARDED_BY(mu_);
+  CallTracerInterface::TransportByteSize server_outgoing_bytes_
+      ABSL_GUARDED_BY(mu_);
+};
 
 class FakeCallTracer : public ClientCallTracer {
  public:
   class FakeCallAttemptTracer : public CallAttemptTracer {
    public:
+    explicit FakeCallAttemptTracer(std::shared_ptr<TestState> test_state)
+        : test_state_(std::move(test_state)) {
+      test_state_->ResetClientByteSizes();
+    }
     std::string TraceId() override { return ""; }
     std::string SpanId() override { return ""; }
     bool IsSampled() override { return false; }
@@ -69,21 +151,40 @@ class FakeCallTracer : public ClientCallTracer {
         grpc_metadata_batch* /*send_initial_metadata*/) override {}
     void RecordSendTrailingMetadata(
         grpc_metadata_batch* /*send_trailing_metadata*/) override {}
-    void RecordSendMessage(const SliceBuffer& /*send_message*/) override {}
+    void RecordSendMessage(const Message& /*send_message*/) override {}
     void RecordSendCompressedMessage(
-        const SliceBuffer& /*send_compressed_message*/) override {}
+        const Message& /*send_compressed_message*/) override {}
     void RecordReceivedInitialMetadata(
         grpc_metadata_batch* /*recv_initial_metadata*/) override {}
-    void RecordReceivedMessage(const SliceBuffer& /*recv_message*/) override {}
+    void RecordReceivedMessage(const Message& /*recv_message*/) override {}
     void RecordReceivedDecompressedMessage(
-        const SliceBuffer& /*recv_decompressed_message*/) override {}
+        const Message& /*recv_decompressed_message*/) override {}
 
     void RecordReceivedTrailingMetadata(
         absl::Status /*status*/,
         grpc_metadata_batch* /*recv_trailing_metadata*/,
         const grpc_transport_stream_stats* transport_stream_stats) override {
-      MutexLock lock(g_mu);
-      transport_stream_stats_ = *transport_stream_stats;
+      if (IsCallTracerInTransportEnabled() ||
+          transport_stream_stats == nullptr /* cancelled call */) {
+        return;
+      }
+      test_state_->ResetClientByteSizes(
+          {transport_stream_stats->incoming.framing_bytes,
+           transport_stream_stats->incoming.data_bytes,
+           transport_stream_stats->incoming.header_bytes},
+          {transport_stream_stats->outgoing.framing_bytes,
+           transport_stream_stats->outgoing.data_bytes,
+           transport_stream_stats->outgoing.header_bytes});
+    }
+
+    void RecordIncomingBytes(
+        const TransportByteSize& transport_byte_size) override {
+      test_state_->IncrementClientIncomingBytes(transport_byte_size);
+    }
+
+    void RecordOutgoingBytes(
+        const TransportByteSize& transport_byte_size) override {
+      test_state_->IncrementClientOutgoingBytes(transport_byte_size);
     }
 
     void RecordCancel(grpc_error_handle /*cancel_error*/) override {}
@@ -91,28 +192,21 @@ class FakeCallTracer : public ClientCallTracer {
       return nullptr;
     }
     void RecordEnd(const gpr_timespec& /*latency*/) override {
-      g_client_call_ended_notify->Notify();
+      test_state_->NotifyClient();
       delete this;
     }
     void RecordAnnotation(absl::string_view /*annotation*/) override {}
     void RecordAnnotation(const Annotation& /*annotation*/) override {}
 
-    void AddOptionalLabels(
-        OptionalLabelComponent /*component*/,
-        std::shared_ptr<std::map<std::string, std::string>> /*labels*/)
-        override {}
-
-    static grpc_transport_stream_stats transport_stream_stats() {
-      MutexLock lock(g_mu);
-      return transport_stream_stats_;
-    }
+    void SetOptionalLabel(OptionalLabelKey /*key*/,
+                          RefCountedStringValue /*value*/) override {}
 
    private:
-    static grpc_transport_stream_stats transport_stream_stats_
-        ABSL_GUARDED_BY(g_mu);
+    std::shared_ptr<TestState> test_state_;
   };
 
-  explicit FakeCallTracer() {}
+  explicit FakeCallTracer(std::shared_ptr<TestState> test_state)
+      : test_state_(std::move(test_state)) {}
   ~FakeCallTracer() override {}
   std::string TraceId() override { return ""; }
   std::string SpanId() override { return ""; }
@@ -120,58 +214,35 @@ class FakeCallTracer : public ClientCallTracer {
 
   FakeCallAttemptTracer* StartNewAttempt(
       bool /*is_transparent_retry*/) override {
-    return new FakeCallAttemptTracer;
+    return new FakeCallAttemptTracer(test_state_);
   }
 
   void RecordAnnotation(absl::string_view /*annotation*/) override {}
   void RecordAnnotation(const Annotation& /*annotation*/) override {}
+
+ private:
+  std::shared_ptr<TestState> test_state_;
 };
-
-grpc_transport_stream_stats
-    FakeCallTracer::FakeCallAttemptTracer::transport_stream_stats_;
-
-class FakeClientFilter : public ChannelFilter {
- public:
-  static const grpc_channel_filter kFilter;
-
-  static absl::StatusOr<FakeClientFilter> Create(
-      const ChannelArgs& /*args*/, ChannelFilter::Args /*filter_args*/) {
-    return FakeClientFilter();
-  }
-
-  ArenaPromise<ServerMetadataHandle> MakeCallPromise(
-      CallArgs call_args, NextPromiseFactory next_promise_factory) override {
-    auto* call_context = GetContext<grpc_call_context_element>();
-    auto* tracer = GetContext<Arena>()->ManagedNew<FakeCallTracer>();
-    GPR_DEBUG_ASSERT(
-        call_context[GRPC_CONTEXT_CALL_TRACER_ANNOTATION_INTERFACE].value ==
-        nullptr);
-    call_context[GRPC_CONTEXT_CALL_TRACER_ANNOTATION_INTERFACE].value = tracer;
-    call_context[GRPC_CONTEXT_CALL_TRACER_ANNOTATION_INTERFACE].destroy =
-        nullptr;
-    return next_promise_factory(std::move(call_args));
-  }
-};
-
-const grpc_channel_filter FakeClientFilter::kFilter =
-    MakePromiseBasedFilter<FakeClientFilter, FilterEndpoint::kClient>(
-        "fake_client");
 
 class FakeServerCallTracer : public ServerCallTracer {
  public:
+  explicit FakeServerCallTracer(std::shared_ptr<TestState> test_state)
+      : test_state_(test_state) {
+    test_state_->ResetServerByteSizes();
+  }
   ~FakeServerCallTracer() override {}
   void RecordSendInitialMetadata(
       grpc_metadata_batch* /*send_initial_metadata*/) override {}
   void RecordSendTrailingMetadata(
       grpc_metadata_batch* /*send_trailing_metadata*/) override {}
-  void RecordSendMessage(const SliceBuffer& /*send_message*/) override {}
+  void RecordSendMessage(const Message& /*send_message*/) override {}
   void RecordSendCompressedMessage(
-      const SliceBuffer& /*send_compressed_message*/) override {}
+      const Message& /*send_compressed_message*/) override {}
   void RecordReceivedInitialMetadata(
       grpc_metadata_batch* /*recv_initial_metadata*/) override {}
-  void RecordReceivedMessage(const SliceBuffer& /*recv_message*/) override {}
+  void RecordReceivedMessage(const Message& /*recv_message*/) override {}
   void RecordReceivedDecompressedMessage(
-      const SliceBuffer& /*recv_decompressed_message*/) override {}
+      const Message& /*recv_decompressed_message*/) override {}
   void RecordCancel(grpc_error_handle /*cancel_error*/) override {}
   std::shared_ptr<TcpTracerInterface> StartNewTcpTrace() override {
     return nullptr;
@@ -180,9 +251,26 @@ class FakeServerCallTracer : public ServerCallTracer {
       grpc_metadata_batch* /*recv_trailing_metadata*/) override {}
 
   void RecordEnd(const grpc_call_final_info* final_info) override {
-    MutexLock lock(g_mu);
-    transport_stream_stats_ = final_info->stats.transport_stream_stats;
-    g_server_call_ended_notify->Notify();
+    if (!IsCallTracerInTransportEnabled()) {
+      test_state_->ResetServerByteSizes(
+          {final_info->stats.transport_stream_stats.incoming.framing_bytes,
+           final_info->stats.transport_stream_stats.incoming.data_bytes,
+           final_info->stats.transport_stream_stats.incoming.header_bytes},
+          {final_info->stats.transport_stream_stats.outgoing.framing_bytes,
+           final_info->stats.transport_stream_stats.outgoing.data_bytes,
+           final_info->stats.transport_stream_stats.outgoing.header_bytes});
+    }
+    test_state_->NotifyServer();
+  }
+
+  void RecordIncomingBytes(
+      const TransportByteSize& transport_byte_size) override {
+    test_state_->IncrementServerIncomingBytes(transport_byte_size);
+  }
+
+  void RecordOutgoingBytes(
+      const TransportByteSize& transport_byte_size) override {
+    test_state_->IncrementServerOutgoingBytes(transport_byte_size);
   }
 
   void RecordAnnotation(absl::string_view /*annotation*/) override {}
@@ -191,47 +279,44 @@ class FakeServerCallTracer : public ServerCallTracer {
   std::string SpanId() override { return ""; }
   bool IsSampled() override { return false; }
 
-  static grpc_transport_stream_stats transport_stream_stats() {
-    MutexLock lock(g_mu);
-    return transport_stream_stats_;
+ private:
+  std::shared_ptr<TestState> test_state_;
+};
+
+// TODO(yijiem): figure out how to reuse FakeStatsPlugin instead of
+// inheriting and overriding it here.
+class NewFakeStatsPlugin : public FakeStatsPlugin {
+ public:
+  explicit NewFakeStatsPlugin(std::shared_ptr<TestState> test_state)
+      : test_state_(std::move(test_state)) {}
+
+  ClientCallTracer* GetClientCallTracer(
+      const Slice& /*path*/, bool /*registered_method*/,
+      std::shared_ptr<StatsPlugin::ScopeConfig> /*scope_config*/) override {
+    return GetContext<Arena>()->ManagedNew<FakeCallTracer>(test_state_);
+  }
+  ServerCallTracer* GetServerCallTracer(
+      std::shared_ptr<StatsPlugin::ScopeConfig> /*scope_config*/) override {
+    return GetContext<Arena>()->ManagedNew<FakeServerCallTracer>(test_state_);
   }
 
  private:
-  static grpc_transport_stream_stats transport_stream_stats_
-      ABSL_GUARDED_BY(g_mu);
-};
-
-grpc_transport_stream_stats FakeServerCallTracer::transport_stream_stats_;
-
-class FakeServerCallTracerFactory : public ServerCallTracerFactory {
- public:
-  ServerCallTracer* CreateNewServerCallTracer(
-      Arena* arena, const ChannelArgs& /*args*/) override {
-    return arena->ManagedNew<FakeServerCallTracer>();
-  }
+  std::shared_ptr<TestState> test_state_;
 };
 
 // This test verifies the HTTP2 stats on a stream
-CORE_END2END_TEST(Http2FullstackSingleHopTest, StreamStats) {
-  if (!IsHttp2StatsFixEnabled()) {
-    GTEST_SKIP() << "Test needs http2_stats_fix experiment to be enabled";
-  }
-  g_mu = new Mutex();
-  g_client_call_ended_notify = new Notification();
-  g_server_call_ended_notify = new Notification();
-  CoreConfiguration::RegisterBuilder([](CoreConfiguration::Builder* builder) {
-    builder->channel_init()->RegisterFilter<FakeClientFilter>(
-        GRPC_CLIENT_CHANNEL);
-  });
-  ServerCallTracerFactory::RegisterGlobal(new FakeServerCallTracerFactory);
-
+CORE_END2END_TEST(Http2FullstackSingleHopTests, StreamStats) {
+  auto test_state = std::make_shared<TestState>(this);
+  GlobalStatsPluginRegistryTestPeer::ResetGlobalStatsPluginRegistry();
+  GlobalStatsPluginRegistry::RegisterStatsPlugin(
+      std::make_shared<NewFakeStatsPlugin>(test_state));
   auto send_from_client = RandomSlice(10);
   auto send_from_server = RandomSlice(20);
-  CoreEnd2endTest::IncomingStatusOnClient server_status;
-  CoreEnd2endTest::IncomingMetadata server_initial_metadata;
-  CoreEnd2endTest::IncomingMessage server_message;
-  CoreEnd2endTest::IncomingMessage client_message;
-  CoreEnd2endTest::IncomingCloseOnServer client_close;
+  IncomingStatusOnClient server_status;
+  IncomingMetadata server_initial_metadata;
+  IncomingMessage server_message;
+  IncomingMessage client_message;
+  IncomingCloseOnServer client_close;
   {
     auto c = NewClientCall("/foo").Timeout(Duration::Minutes(5)).Create();
     c.NewBatch(1)
@@ -262,41 +347,31 @@ CORE_END2END_TEST(Http2FullstackSingleHopTest, StreamStats) {
   EXPECT_EQ(client_message.payload(), send_from_client);
   EXPECT_EQ(server_message.payload(), send_from_server);
   // Make sure that the calls have ended for the stats to have been collected
-  g_client_call_ended_notify->WaitForNotificationWithTimeout(absl::Seconds(5));
-  g_server_call_ended_notify->WaitForNotificationWithTimeout(absl::Seconds(5));
-
-  auto client_transport_stats =
-      FakeCallTracer::FakeCallAttemptTracer::transport_stream_stats();
-  auto server_transport_stats = FakeServerCallTracer::transport_stream_stats();
-  EXPECT_EQ(client_transport_stats.outgoing.data_bytes,
+  test_state->WaitForClient();
+  test_state->WaitForServer();
+  auto [client_incoming_transport_stats, client_outgoing_transport_stats,
+        server_incoming_transport_stats, server_outgoing_transport_stats] =
+      test_state->ByteSizes();
+  EXPECT_EQ(client_outgoing_transport_stats.data_bytes,
             send_from_client.size());
-  EXPECT_EQ(client_transport_stats.incoming.data_bytes,
+  EXPECT_EQ(client_incoming_transport_stats.data_bytes,
             send_from_server.size());
-  EXPECT_EQ(server_transport_stats.outgoing.data_bytes,
+  EXPECT_EQ(server_outgoing_transport_stats.data_bytes,
             send_from_server.size());
-  EXPECT_EQ(server_transport_stats.incoming.data_bytes,
+  EXPECT_EQ(server_incoming_transport_stats.data_bytes,
             send_from_client.size());
   // At the very minimum, we should have 9 bytes from initial header frame, 9
   // bytes from data header frame, 5 bytes from the grpc header on data and 9
   // bytes from the trailing header frame. The actual number might be more due
   // to RST_STREAM (13 bytes) and WINDOW_UPDATE (13 bytes) frames.
-  EXPECT_GE(client_transport_stats.outgoing.framing_bytes, 32);
-  EXPECT_LE(client_transport_stats.outgoing.framing_bytes, 58);
-  EXPECT_GE(client_transport_stats.incoming.framing_bytes, 32);
-  EXPECT_LE(client_transport_stats.incoming.framing_bytes, 58);
-  EXPECT_GE(server_transport_stats.outgoing.framing_bytes, 32);
-  EXPECT_LE(server_transport_stats.outgoing.framing_bytes, 58);
-  EXPECT_GE(server_transport_stats.incoming.framing_bytes, 32);
-  EXPECT_LE(server_transport_stats.incoming.framing_bytes, 58);
-
-  delete ServerCallTracerFactory::Get(ChannelArgs());
-  ServerCallTracerFactory::RegisterGlobal(nullptr);
-  delete g_client_call_ended_notify;
-  g_client_call_ended_notify = nullptr;
-  delete g_server_call_ended_notify;
-  g_server_call_ended_notify = nullptr;
-  delete g_mu;
-  g_mu = nullptr;
+  EXPECT_GE(client_outgoing_transport_stats.framing_bytes, 32);
+  EXPECT_LE(client_outgoing_transport_stats.framing_bytes, 58);
+  EXPECT_GE(client_incoming_transport_stats.framing_bytes, 32);
+  EXPECT_LE(client_incoming_transport_stats.framing_bytes, 58);
+  EXPECT_GE(server_outgoing_transport_stats.framing_bytes, 32);
+  EXPECT_LE(server_outgoing_transport_stats.framing_bytes, 58);
+  EXPECT_GE(server_incoming_transport_stats.framing_bytes, 32);
+  EXPECT_LE(server_incoming_transport_stats.framing_bytes, 58);
 }
 
 }  // namespace

@@ -19,10 +19,10 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
-
-#include "src/core/lib/gprpp/sync.h"
+#include "absl/log/check.h"
 #include "src/core/lib/promise/activity.h"
 #include "src/core/lib/promise/poll.h"
+#include "src/core/util/sync.h"
 
 namespace grpc_core {
 
@@ -123,8 +123,9 @@ class Observable {
     Observer(const Observer&) = delete;
     Observer& operator=(const Observer&) = delete;
     Observer(Observer&& other) noexcept : state_(std::move(other.state_)) {
-      GPR_ASSERT(other.waker_.is_unwakeable());
-      GPR_ASSERT(!other.saw_pending_);
+      CHECK(other.waker_.is_unwakeable());
+      DCHECK(waker_.is_unwakeable());
+      CHECK(!other.saw_pending_);
     }
     Observer& operator=(Observer&& other) noexcept = delete;
 

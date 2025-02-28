@@ -20,28 +20,23 @@
 #define GRPC_SRC_CORE_EXT_TRANSPORT_CHTTP2_TRANSPORT_FLOW_CONTROL_H
 
 #include <grpc/support/port_platform.h>
-
 #include <limits.h>
 #include <stdint.h>
 
 #include <iosfwd>
+#include <optional>
 #include <string>
 #include <utility>
 
 #include "absl/functional/function_ref.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
-
-#include <grpc/support/log.h>
-
 #include "src/core/ext/transport/chttp2/transport/http2_settings.h"
 #include "src/core/lib/debug/trace.h"
-#include "src/core/lib/gprpp/time.h"
 #include "src/core/lib/resource_quota/memory_quota.h"
 #include "src/core/lib/transport/bdp_estimator.h"
-
-extern grpc_core::TraceFlag grpc_flowctl_trace;
+#include "src/core/util/time.h"
 
 namespace grpc {
 namespace testing {
@@ -133,7 +128,7 @@ class GRPC_MUST_USE_RESULT FlowControlAction {
   static const char* UrgencyString(Urgency u);
   std::string DebugString() const;
 
-  void AssertEmpty() { GPR_ASSERT(*this == FlowControlAction()); }
+  void AssertEmpty() { CHECK(*this == FlowControlAction()); }
 
   bool operator==(const FlowControlAction& other) const {
     return send_stream_update_ == other.send_stream_update_ &&
@@ -196,7 +191,7 @@ class TransportFlowControl final {
   class IncomingUpdateContext {
    public:
     explicit IncomingUpdateContext(TransportFlowControl* tfc) : tfc_(tfc) {}
-    ~IncomingUpdateContext() { GPR_ASSERT(tfc_ == nullptr); }
+    ~IncomingUpdateContext() { CHECK_EQ(tfc_, nullptr); }
 
     IncomingUpdateContext(const IncomingUpdateContext&) = delete;
     IncomingUpdateContext& operator=(const IncomingUpdateContext&) = delete;
@@ -445,7 +440,7 @@ class StreamFlowControl final {
     int64_t min_progress_size;
     int64_t remote_window_delta;
     int64_t announced_window_delta;
-    absl::optional<int64_t> pending_size;
+    std::optional<int64_t> pending_size;
 
     std::string ToString() const;
   };
@@ -464,7 +459,7 @@ class StreamFlowControl final {
   int64_t min_progress_size_ = 0;
   int64_t remote_window_delta_ = 0;
   int64_t announced_window_delta_ = 0;
-  absl::optional<int64_t> pending_size_;
+  std::optional<int64_t> pending_size_;
 
   FlowControlAction UpdateAction(FlowControlAction action);
 };

@@ -27,7 +27,6 @@
 #include <vector>
 
 #include "absl/functional/function_ref.h"
-
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/iomgr/resolved_address.h"
 
@@ -40,12 +39,15 @@
 // A channel arg indicating the weight of an address.
 #define GRPC_ARG_ADDRESS_WEIGHT GRPC_ARG_NO_SUBCHANNEL_PREFIX "address.weight"
 
+// Name associated with individual address, if available (e.g., DNS name).
+#define GRPC_ARG_ADDRESS_NAME "grpc.address_name"
+
 namespace grpc_core {
 
 // A list of addresses for a given endpoint with an associated set of channel
 // args.  Any args present here will be merged into the channel args when a
 // subchannel is created for each address.
-class EndpointAddresses {
+class EndpointAddresses final {
  public:
   // For backward compatibility.
   // TODO(roth): Remove when callers have been updated.
@@ -102,7 +104,7 @@ struct ResolvedAddressLessThan {
                   const grpc_resolved_address& addr2) const;
 };
 
-class EndpointAddressSet {
+class EndpointAddressSet final {
  public:
   explicit EndpointAddressSet(
       const std::vector<grpc_resolved_address>& addresses)
@@ -128,7 +130,7 @@ class EndpointAddressesIterator {
 };
 
 // Iterator over a fixed list of endpoints.
-class EndpointAddressesListIterator : public EndpointAddressesIterator {
+class EndpointAddressesListIterator final : public EndpointAddressesIterator {
  public:
   explicit EndpointAddressesListIterator(EndpointAddressesList endpoints)
       : endpoints_(std::move(endpoints)) {}
@@ -145,7 +147,7 @@ class EndpointAddressesListIterator : public EndpointAddressesIterator {
 };
 
 // Iterator that returns only a single endpoint.
-class SingleEndpointIterator : public EndpointAddressesIterator {
+class SingleEndpointIterator final : public EndpointAddressesIterator {
  public:
   explicit SingleEndpointIterator(EndpointAddresses endpoint)
       : endpoint_(std::move(endpoint)) {}

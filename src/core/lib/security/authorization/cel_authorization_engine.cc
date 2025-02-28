@@ -12,22 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <grpc/support/port_platform.h>
-
 #include "src/core/lib/security/authorization/cel_authorization_engine.h"
 
+#include <grpc/support/port_platform.h>
 #include <stddef.h>
 
 #include <algorithm>
+#include <optional>
 #include <utility>
 
+#include "absl/log/log.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "absl/types/span.h"
 #include "upb/base/string_view.h"
 #include "upb/message/map.h"
-
-#include <grpc/support/log.h>
 
 namespace grpc_core {
 
@@ -51,16 +49,14 @@ std::unique_ptr<CelAuthorizationEngine>
 CelAuthorizationEngine::CreateCelAuthorizationEngine(
     const std::vector<envoy_config_rbac_v3_RBAC*>& rbac_policies) {
   if (rbac_policies.empty() || rbac_policies.size() > 2) {
-    gpr_log(GPR_ERROR,
-            "Invalid rbac policies vector. Must contain either one or two rbac "
-            "policies.");
+    LOG(ERROR) << "Invalid rbac policies vector. Must contain either one or "
+                  "two rbac policies.";
     return nullptr;
   } else if (rbac_policies.size() == 2 &&
              (envoy_config_rbac_v3_RBAC_action(rbac_policies[0]) != kDeny ||
               envoy_config_rbac_v3_RBAC_action(rbac_policies[1]) != kAllow)) {
-    gpr_log(GPR_ERROR,
-            "Invalid rbac policies vector. Must contain one deny \
-                         policy and one allow policy, in that order.");
+    LOG(ERROR) << "Invalid rbac policies vector. Must contain one deny policy "
+                  "and one allow policy, in that order.";
     return nullptr;
   } else {
     return std::make_unique<CelAuthorizationEngine>(rbac_policies);
@@ -73,29 +69,33 @@ CelAuthorizationEngine::CelAuthorizationEngine(
     // Extract array of policies and store their condition fields in either
     // allow_if_matched_ or deny_if_matched_, depending on the policy action.
     upb::Arena temp_arena;
-    size_t policy_num = kUpb_Map_Begin;
-    const envoy_config_rbac_v3_RBAC_PoliciesEntry* policy_entry;
-    while ((policy_entry = envoy_config_rbac_v3_RBAC_policies_next(
-                rbac_policy, &policy_num)) != nullptr) {
-      const upb_StringView policy_name_strview =
-          envoy_config_rbac_v3_RBAC_PoliciesEntry_key(policy_entry);
-      const std::string policy_name(policy_name_strview.data,
-                                    policy_name_strview.size);
-      const envoy_config_rbac_v3_Policy* policy =
-          envoy_config_rbac_v3_RBAC_PoliciesEntry_value(policy_entry);
-      const google_api_expr_v1alpha1_Expr* condition =
-          envoy_config_rbac_v3_Policy_condition(policy);
-      // Parse condition to make a pointer tied to the lifetime of arena_.
-      size_t serial_len;
-      const char* serialized = google_api_expr_v1alpha1_Expr_serialize(
-          condition, temp_arena.ptr(), &serial_len);
-      const google_api_expr_v1alpha1_Expr* parsed_condition =
-          google_api_expr_v1alpha1_Expr_parse(serialized, serial_len,
-                                              arena_.ptr());
-      if (envoy_config_rbac_v3_RBAC_action(rbac_policy) == kAllow) {
-        allow_if_matched_.insert(std::make_pair(policy_name, parsed_condition));
-      } else {
-        deny_if_matched_.insert(std::make_pair(policy_name, parsed_condition));
+    // TODO(b/397931390): Clean up the code after gRPC OSS migrates to proto
+    // v30.0.
+    const upb_Map* upb_map =
+        _envoy_config_rbac_v3_RBAC_policies_upb_map(rbac_policy);
+    if (upb_map) {
+      size_t policy_num = kUpb_Map_Begin;
+      upb_MessageValue k, v;
+      while (upb_Map_Next(upb_map, &k, &v, &policy_num)) {
+        upb_StringView policy_name_strview = k.str_val;
+        const envoy_config_rbac_v3_Policy* policy =
+            (envoy_config_rbac_v3_Policy*)v.msg_val;
+        const std::string policy_name(policy_name_strview.data,
+                                      policy_name_strview.size);
+        const google_api_expr_v1alpha1_Expr* condition =
+            envoy_config_rbac_v3_Policy_condition(policy);
+        // Parse condition to make a pointer tied to the lifetime of arena_.
+        size_t serial_len;
+        const char* serialized = google_api_expr_v1alpha1_Expr_serialize(
+            condition, temp_arena.ptr(), &serial_len);
+        const google_api_expr_v1alpha1_Expr* parsed_condition =
+            google_api_expr_v1alpha1_Expr_parse(serialized, serial_len,
+                                                arena_.ptr());
+        if (envoy_config_rbac_v3_RBAC_action(rbac_policy) == kAllow) {
+          allow_if_matched_.insert(std::pair(policy_name, parsed_condition));
+        } else {
+          deny_if_matched_.insert(std::pair(policy_name, parsed_condition));
+        }
       }
     }
   }
@@ -128,7 +128,7 @@ std::unique_ptr<mock_cel::Activation> CelAuthorizationEngine::CreateActivation(
           header_items;
       for (const auto& header_key : header_keys_) {
         std::string temp_value;
-        absl::optional<absl::string_view> header_value =
+        std::optional<absl::string_view> header_value =
             args.GetHeaderValue(header_key, &temp_value);
         if (header_value.has_value()) {
           header_items.push_back(
@@ -176,10 +176,9 @@ std::unique_ptr<mock_cel::Activation> CelAuthorizationEngine::CreateActivation(
             mock_cel::CelValue::CreateStringView(cert_server_name));
       }
     } else {
-      gpr_log(GPR_ERROR,
-              "Error: Authorization engine does not support evaluating "
-              "attribute %s.",
-              elem.c_str());
+      LOG(ERROR) << "Error: Authorization engine does not support evaluating "
+                    "attribute "
+                 << elem;
     }
   }
   return activation;

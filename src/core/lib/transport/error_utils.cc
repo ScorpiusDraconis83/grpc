@@ -16,18 +16,16 @@
 //
 //
 
-#include <grpc/support/port_platform.h>
-
 #include "src/core/lib/transport/error_utils.h"
 
+#include <grpc/support/port_platform.h>
+#include <grpc/support/string_util.h>
 #include <stdint.h>
 
 #include <vector>
 
-#include <grpc/support/string_util.h>
-
-#include "src/core/lib/gprpp/status_helper.h"
 #include "src/core/lib/transport/status_conversion.h"
+#include "src/core/util/status_helper.h"
 
 static grpc_error_handle recursively_find_error_with_field(
     grpc_error_handle error, grpc_core::StatusIntProperty which) {
@@ -123,11 +121,9 @@ void grpc_error_get_status(grpc_error_handle error,
   if (message != nullptr) {
     if (!grpc_error_get_str(
             found_error, grpc_core::StatusStrProperty::kGrpcMessage, message)) {
-      if (!grpc_error_get_str(found_error,
-                              grpc_core::StatusStrProperty::kDescription,
-                              message)) {
-        *message = grpc_core::StatusToString(error);
-      }
+      *message = found_error.message().empty()
+                     ? grpc_core::StatusToString(error)
+                     : std::string(found_error.message());
     }
   }
 }

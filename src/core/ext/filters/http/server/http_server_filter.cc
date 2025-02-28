@@ -16,22 +16,20 @@
 //
 //
 
-#include <grpc/support/port_platform.h>
-
 #include "src/core/ext/filters/http/server/http_server_filter.h"
-
-#include <functional>
-#include <memory>
-#include <utility>
-
-#include "absl/base/attributes.h"
-#include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 
 #include <grpc/impl/channel_arg_names.h>
 #include <grpc/status.h>
-#include <grpc/support/log.h>
+#include <grpc/support/port_platform.h>
 
+#include <functional>
+#include <memory>
+#include <optional>
+#include <utility>
+
+#include "absl/base/attributes.h"
+#include "absl/log/log.h"
+#include "absl/strings/string_view.h"
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/channel/channel_stack.h"
 #include "src/core/lib/debug/trace.h"
@@ -44,18 +42,14 @@
 #include "src/core/lib/resource_quota/arena.h"
 #include "src/core/lib/slice/percent_encoding.h"
 #include "src/core/lib/slice/slice.h"
-#include "src/core/lib/surface/call_trace.h"
 #include "src/core/lib/transport/metadata_batch.h"
+#include "src/core/util/latent_see.h"
 
 namespace grpc_core {
 
-const NoInterceptor HttpServerFilter::Call::OnClientToServerMessage;
-const NoInterceptor HttpServerFilter::Call::OnServerToClientMessage;
-const NoInterceptor HttpServerFilter::Call::OnFinalize;
-
 const grpc_channel_filter HttpServerFilter::kFilter =
     MakePromiseBasedFilter<HttpServerFilter, FilterEndpoint::kServer,
-                           kFilterExaminesServerInitialMetadata>("http-server");
+                           kFilterExaminesServerInitialMetadata>();
 
 namespace {
 void FilterOutgoingMetadata(ServerMetadata* md) {
@@ -67,7 +61,7 @@ void FilterOutgoingMetadata(ServerMetadata* md) {
 
 ServerMetadataHandle MalformedRequest(absl::string_view explanation) {
   auto* arena = GetContext<Arena>();
-  auto hdl = arena->MakePooled<ServerMetadata>(arena);
+  auto hdl = arena->MakePooled<ServerMetadata>();
   hdl->Set(GrpcStatusMetadata(), GRPC_STATUS_UNKNOWN);
   hdl->Set(GrpcMessageMetadata(), Slice::FromStaticString(explanation));
   hdl->Set(GrpcTarPit(), Empty());
@@ -77,6 +71,8 @@ ServerMetadataHandle MalformedRequest(absl::string_view explanation) {
 
 ServerMetadataHandle HttpServerFilter::Call::OnClientInitialMetadata(
     ClientMetadata& md, HttpServerFilter* filter) {
+  GRPC_LATENT_SEE_INNER_SCOPE(
+      "HttpServerFilter::Call::OnClientInitialMetadata");
   auto method = md.get(HttpMethodMetadata());
   if (method.has_value()) {
     switch (*method) {
@@ -86,7 +82,7 @@ ServerMetadataHandle HttpServerFilter::Call::OnClientInitialMetadata(
         if (filter->allow_put_requests_) {
           break;
         }
-        ABSL_FALLTHROUGH_INTENDED;
+        [[fallthrough]];
       case HttpMethodMetadata::kInvalid:
       case HttpMethodMetadata::kGet:
         return MalformedRequest("Bad method header");
@@ -121,7 +117,7 @@ ServerMetadataHandle HttpServerFilter::Call::OnClientInitialMetadata(
   }
 
   if (md.get_pointer(HttpAuthorityMetadata()) == nullptr) {
-    absl::optional<Slice> host = md.Take(HostMetadata());
+    std::optional<Slice> host = md.Take(HostMetadata());
     if (host.has_value()) {
       md.Set(HttpAuthorityMetadata(), std::move(*host));
     }
@@ -139,22 +135,24 @@ ServerMetadataHandle HttpServerFilter::Call::OnClientInitialMetadata(
 }
 
 void HttpServerFilter::Call::OnServerInitialMetadata(ServerMetadata& md) {
-  if (grpc_call_trace.enabled()) {
-    gpr_log(GPR_INFO, "%s[http-server] Write metadata",
-            GetContext<Activity>()->DebugTag().c_str());
-  }
+  GRPC_LATENT_SEE_INNER_SCOPE(
+      "HttpServerFilter::Call::OnServerInitialMetadata");
+  GRPC_TRACE_LOG(call, INFO)
+      << GetContext<Activity>()->DebugTag() << "[http-server] Write metadata";
   FilterOutgoingMetadata(&md);
   md.Set(HttpStatusMetadata(), 200);
   md.Set(ContentTypeMetadata(), ContentTypeMetadata::kApplicationGrpc);
 }
 
 void HttpServerFilter::Call::OnServerTrailingMetadata(ServerMetadata& md) {
+  GRPC_LATENT_SEE_INNER_SCOPE(
+      "HttpServerFilter::Call::OnServerTrailingMetadata");
   FilterOutgoingMetadata(&md);
 }
 
-absl::StatusOr<HttpServerFilter> HttpServerFilter::Create(
+absl::StatusOr<std::unique_ptr<HttpServerFilter>> HttpServerFilter::Create(
     const ChannelArgs& args, ChannelFilter::Args) {
-  return HttpServerFilter(
+  return std::make_unique<HttpServerFilter>(
       args.GetBool(GRPC_ARG_SURFACE_USER_AGENT).value_or(true),
       args.GetBool(
               GRPC_ARG_DO_NOT_USE_UNLESS_YOU_HAVE_PERMISSION_FROM_GRPC_TEAM_ALLOW_BROKEN_PUT_REQUESTS)

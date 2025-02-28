@@ -19,8 +19,8 @@
 
 #include <utility>
 
+#include "absl/functional/any_invocable.h"
 #include "absl/meta/type_traits.h"
-
 #include "src/core/lib/promise/poll.h"
 
 // A Promise is a callable object that returns Poll<T> for some T.
@@ -50,18 +50,27 @@ namespace promise_detail {
 
 template <typename T>
 struct PollWrapper {
-  static Poll<T> Wrap(T&& x) { return Poll<T>(std::forward<T>(x)); }
+  GPR_ATTRIBUTE_ALWAYS_INLINE_FUNCTION static Poll<T> Wrap(T&& x) {
+    return Poll<T>(std::forward<T>(x));
+  }
 };
 
 template <typename T>
 struct PollWrapper<Poll<T>> {
-  static Poll<T> Wrap(Poll<T>&& x) { return std::forward<Poll<T>>(x); }
+  GPR_ATTRIBUTE_ALWAYS_INLINE_FUNCTION static Poll<T> Wrap(Poll<T>&& x) {
+    return std::forward<Poll<T>>(x);
+  }
 };
 
 template <typename T>
-auto WrapInPoll(T&& x) -> decltype(PollWrapper<T>::Wrap(std::forward<T>(x))) {
+GPR_ATTRIBUTE_ALWAYS_INLINE_FUNCTION inline auto WrapInPoll(T&& x)
+    -> decltype(PollWrapper<T>::Wrap(std::forward<T>(x))) {
   return PollWrapper<T>::Wrap(std::forward<T>(x));
 }
+
+// T -> T, const T& -> T
+template <typename T>
+using RemoveCVRef = absl::remove_cv_t<absl::remove_reference_t<T>>;
 
 template <typename F, typename SfinaeVoid = void>
 class PromiseLike;
@@ -70,21 +79,47 @@ template <>
 class PromiseLike<void>;
 
 template <typename F>
-class PromiseLike<F, absl::enable_if_t<!std::is_void<
-                         typename std::result_of<F()>::type>::value>> {
+class PromiseLike<
+    F, absl::enable_if_t<!std::is_void<std::invoke_result_t<F>>::value>> {
  private:
-  GPR_NO_UNIQUE_ADDRESS F f_;
+  GPR_NO_UNIQUE_ADDRESS RemoveCVRef<F> f_;
+  using OriginalResult = decltype(f_());
+  using WrappedResult = decltype(WrapInPoll(std::declval<OriginalResult>()));
 
  public:
   // NOLINTNEXTLINE - internal detail that drastically simplifies calling code.
-  PromiseLike(F&& f) : f_(std::forward<F>(f)) {}
-  auto operator()() -> decltype(WrapInPoll(f_())) { return WrapInPoll(f_()); }
-  using Result = typename PollTraits<decltype(WrapInPoll(f_()))>::Type;
+  GPR_ATTRIBUTE_ALWAYS_INLINE_FUNCTION PromiseLike(F&& f)
+      : f_(std::forward<F>(f)) {}
+  GPR_ATTRIBUTE_ALWAYS_INLINE_FUNCTION WrappedResult operator()() {
+    return WrapInPoll(f_());
+  }
+  PromiseLike(const PromiseLike&) = default;
+  PromiseLike& operator=(const PromiseLike&) = default;
+  PromiseLike(PromiseLike&&) = default;
+  PromiseLike& operator=(PromiseLike&&) = default;
+  using Result = typename PollTraits<WrappedResult>::Type;
 };
 
-// T -> T, const T& -> T
-template <typename T>
-using RemoveCVRef = absl::remove_cv_t<absl::remove_reference_t<T>>;
+template <typename F>
+class PromiseLike<
+    F, absl::enable_if_t<std::is_void<std::invoke_result_t<F>>::value>> {
+ private:
+  GPR_NO_UNIQUE_ADDRESS RemoveCVRef<F> f_;
+
+ public:
+  // NOLINTNEXTLINE - internal detail that drastically simplifies calling code.
+  GPR_ATTRIBUTE_ALWAYS_INLINE_FUNCTION PromiseLike(F&& f)
+      : f_(std::forward<F>(f)) {}
+  GPR_ATTRIBUTE_ALWAYS_INLINE_FUNCTION Poll<Empty> operator()() {
+    f_();
+    return Empty{};
+  }
+  PromiseLike(const PromiseLike&) = default;
+  PromiseLike& operator=(const PromiseLike&) = default;
+  PromiseLike(PromiseLike&&) = default;
+  PromiseLike& operator=(PromiseLike&&) = default;
+  using Result = Empty;
+};
 
 }  // namespace promise_detail
 }  // namespace grpc_core

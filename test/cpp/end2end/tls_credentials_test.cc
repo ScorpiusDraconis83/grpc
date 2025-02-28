@@ -15,13 +15,6 @@
 // limitations under the License.
 //
 //
-#include <memory>
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
-#include "absl/synchronization/notification.h"
-
 #include <grpc/grpc_security.h>
 #include <grpcpp/channel.h>
 #include <grpcpp/client_context.h>
@@ -31,9 +24,15 @@
 #include <grpcpp/server.h>
 #include <grpcpp/server_builder.h>
 
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
-#include "test/core/util/tls_utils.h"
+#include <memory>
+
+#include "absl/log/log.h"
+#include "absl/synchronization/notification.h"
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
+#include "test/core/test_util/tls_utils.h"
 #include "test/cpp/end2end/test_service_impl.h"
 
 namespace grpc {
@@ -114,9 +113,8 @@ void DoRpc(const std::string& server_addr,
   grpc::Status result = stub->Echo(&context, request, &response);
   EXPECT_TRUE(result.ok());
   if (!result.ok()) {
-    gpr_log(GPR_ERROR, "Echo failed: %d, %s, %s",
-            static_cast<int>(result.error_code()),
-            result.error_message().c_str(), result.error_details().c_str());
+    LOG(ERROR) << "Echo failed: " << result.error_code() << ", "
+               << result.error_message() << ", " << result.error_details();
   }
   EXPECT_EQ(response.message(), kMessage);
 }

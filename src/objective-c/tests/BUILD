@@ -14,6 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@build_bazel_rules_apple//apple:macos.bzl", "macos_unit_test")
+load("@build_bazel_rules_apple//apple:resources.bzl", "apple_resource_bundle")
+load("@build_bazel_rules_apple//apple:tvos.bzl", "tvos_application", "tvos_unit_test")
 load("//bazel:grpc_build_system.bzl", "grpc_sh_test")
 load(
     "//src/objective-c:grpc_objc_internal_library.bzl",
@@ -22,9 +25,6 @@ load(
     "local_objc_grpc_library",
     "proto_library_objc_wrapper",
 )
-load("@build_bazel_rules_apple//apple:resources.bzl", "apple_resource_bundle")
-load("@build_bazel_rules_apple//apple:macos.bzl", "macos_unit_test")
-load("@build_bazel_rules_apple//apple:tvos.bzl", "tvos_application", "tvos_unit_test")
 
 licenses(["notice"])
 
@@ -85,7 +85,7 @@ tvos_application(
     name = "tvos-host",
     bundle_id = "grpc.objc.tests.tvos-host",
     infoplists = ["Hosts/ios-host/Info.plist"],
-    minimum_os_version = "10.0",
+    minimum_os_version = "13.0",
     deps = ["host-lib"],
 )
 
@@ -171,73 +171,6 @@ grpc_objc_testing_library(
     hdrs = ["MacTests/StressTests.h"],
 )
 
-# TODO: Enable this again once @CronetFramework is working
-#grpc_objc_testing_library(
-#    name = "CronetTests-lib",
-#    srcs = [
-#        "ConfigureCronet.m",
-#    ] + glob([
-#        "CronetTests/*.m",
-#        "CronetTests/*.mm",
-#    ]),
-#    hdrs = [
-#        "ConfigureCronet.h",
-#    ],
-#    deps = [
-#        "InteropTests-lib",
-#        "//src/objective-c:grpc_objc_client_core_cronet_testing",
-#        "//test/core/end2end:cq_verifier",
-#        "//test/core/end2end:ssl_test_data",
-#        "//third_party/objective_c/Cronet:cronet_c_for_grpc",
-#    ],
-#)
-#
-#grpc_objc_testing_library(
-#    name = "CppCronetTests-lib",
-#    srcs = glob([
-#        "CppCronetTests/*.m",
-#        "CppCronetTests/*.mm",
-#    ]),
-#    hdrs = glob([
-#        "CppCronetTests/*.h",
-#    ]),
-#    deps = [
-#        "//:grpc++_cronet_credentials",
-#        "//src/objective-c:grpc_objc_client_core_cronet_testing",
-#        "//src/proto/grpc/testing:echo_proto",
-#        "//test/core/end2end:ssl_test_data",
-#    ],
-#)
-#
-#grpc_objc_testing_library(
-#    name = "PerfTests-lib-Posix",
-#    srcs = [
-#        "ConfigureCronet.m",
-#        "PerfTests/PerfTests.m",
-#        "PerfTests/PerfTestsBlockCallbacks.m",
-#        "PerfTests/PerfTestsNoCFStreamSSL.m",
-#    ],
-#    hdrs = ["ConfigureCronet.h"] + glob(["PerfTests/*.h"]),
-#    deps = [
-#        "//src/objective-c:grpc_objc_client_core_cronet_testing",
-#    ],
-#)
-#
-#grpc_objc_testing_library(
-#    name = "PerfTests-lib",
-#    srcs = [
-#        "ConfigureCronet.m",
-#        "PerfTests/PerfTests.m",
-#        "PerfTests/PerfTestsBlockCallbacks.m",
-#        "PerfTests/PerfTestsCFStreamSSL.m",
-#        "PerfTests/PerfTestsCronet.m",
-#    ],
-#    hdrs = ["ConfigureCronet.h"] + glob(["PerfTests/*.h"]),
-#    deps = [
-#        "//src/objective-c:grpc_objc_client_core_cronet_testing",
-#    ],
-#)
-
 grpc_objc_testing_library(
     name = "UnitTests",
     deps = [
@@ -272,41 +205,9 @@ grpc_objc_ios_unit_test(
     ],
 )
 
-# TODO: Enable this again once @CronetFramework is working
-# grpc_objc_ios_unit_test(
-#     name = "CronetTests",
-#     deps = [
-#         "CronetTests-lib",
-#     ],
-# )
-#
-# grpc_objc_ios_unit_test(
-#     name = "CppCronetTests",
-#     deps = [
-#         "CppCronetTests-lib",
-#     ],
-# )
-#
-# grpc_objc_ios_unit_test(
-#     name = "PerfTestsPosix",
-#     deps = [
-#         "PerfTests-lib-Posix",
-#     ],
-# )
-#
-# grpc_objc_ios_unit_test(
-#     name = "PerfTests",
-#     env = {
-#         "GRPC_CFSTREAM_RUN_LOOP": "1",
-#     },
-#     deps = [
-#         "PerfTests-lib",
-#     ],
-# )
-
 macos_unit_test(
     name = "MacTests",
-    minimum_os_version = "10.10",
+    minimum_os_version = "11.0",
     deps = [
         ":APIv2Tests-lib",
         ":InteropTestsLocalCleartext-lib",
@@ -324,7 +225,7 @@ grpc_objc_testing_library(
     deps = [
         "//:gpr_platform",
         "//src/core:iomgr_port",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -336,7 +237,6 @@ grpc_objc_ios_unit_test(
 grpc_objc_testing_library(
     name = "EventEngineClientTests-lib",
     srcs = ["EventEngineTests/CFEventEngineClientTests.mm"],
-    # defines = ["GRPC_IOS_EVENT_ENGINE_CLIENT=1"],
     deps = [
         "//src/core:cf_event_engine",
         "//test/core/event_engine/test_suite/posix:oracle_event_engine_posix",
@@ -347,7 +247,6 @@ grpc_objc_testing_library(
 grpc_objc_testing_library(
     name = "EventEngineUnitTests-lib",
     srcs = ["EventEngineTests/CFEventEngineUnitTests.mm"],
-    defines = ["GRPC_IOS_EVENT_ENGINE_CLIENT=1"],
     deps = [
         "//src/core:cf_event_engine",
         "//test/core/event_engine/cf:cf_engine_unit_test_lib",
@@ -370,7 +269,7 @@ grpc_objc_ios_unit_test(
 # See https://github.com/bazelbuild/rules_apple/blob/8d841342c238457896cd7596cc29b2d06c9a75f0/apple/testing/default_runner/tvos_test_runner.template.sh
 tvos_unit_test(
     name = "TvTests",
-    minimum_os_version = "10.0",
+    minimum_os_version = "13.0",
     test_host = ":tvos-host",
     deps = [
         ":APIv2Tests-lib",
@@ -401,6 +300,7 @@ grpc_sh_test(
     srcs = ["PluginTest/plugin_test.sh"],
     data = [
         "//src/compiler:grpc_objective_c_plugin",
+        "@bazel_tools//tools/bash/runfiles",
         "@com_google_protobuf//:protoc",
     ] + glob(["PluginTest/*.proto"]),
     uses_polling = False,
@@ -411,6 +311,7 @@ grpc_sh_test(
     srcs = ["PluginTest/plugin_option_test.sh"],
     data = [
         "//src/compiler:grpc_objective_c_plugin",
+        "@bazel_tools//tools/bash/runfiles",
         "@com_google_protobuf//:protoc",
         "@com_google_protobuf//:well_known_type_protos",
     ] + glob(["RemoteTestClient/*.proto"]),

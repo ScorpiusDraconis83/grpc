@@ -24,21 +24,20 @@
 
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
-
-#include "src/core/lib/gprpp/orphanable.h"
-#include "src/core/lib/gprpp/ref_counted_ptr.h"
-#include "src/core/lib/json/json.h"
 #include "src/core/load_balancing/lb_policy.h"
 #include "src/core/load_balancing/lb_policy_factory.h"
+#include "src/core/util/json/json.h"
+#include "src/core/util/orphanable.h"
+#include "src/core/util/ref_counted_ptr.h"
 
 namespace grpc_core {
 
-class LoadBalancingPolicyRegistry {
+class LoadBalancingPolicyRegistry final {
  public:
   /// Methods used to create and populate the LoadBalancingPolicyRegistry.
   /// NOT THREAD SAFE -- to be used only during global gRPC
   /// initialization and shutdown.
-  class Builder {
+  class Builder final {
    public:
     /// Registers an LB policy factory.  The factory will be used to create an
     /// LB policy whose name matches that of the factory.

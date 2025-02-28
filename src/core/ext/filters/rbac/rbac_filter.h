@@ -18,11 +18,9 @@
 #define GRPC_SRC_CORE_EXT_FILTERS_RBAC_RBAC_FILTER_H
 
 #include <grpc/support/port_platform.h>
-
 #include <stddef.h>
 
 #include "absl/status/statusor.h"
-
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/channel/channel_fwd.h"
 #include "src/core/lib/channel/promise_based_filter.h"
@@ -42,24 +40,27 @@ class RbacFilter : public ImplementChannelFilter<RbacFilter> {
   // and enforces the RBAC policy.
   static const grpc_channel_filter kFilterVtable;
 
-  static absl::StatusOr<RbacFilter> Create(const ChannelArgs& args,
-                                           ChannelFilter::Args filter_args);
+  static absl::string_view TypeName() { return "rbac_filter"; }
+
+  static absl::StatusOr<std::unique_ptr<RbacFilter>> Create(
+      const ChannelArgs& args, ChannelFilter::Args filter_args);
+
+  RbacFilter(size_t index,
+             EvaluateArgs::PerChannelArgs per_channel_evaluate_args);
 
   class Call {
    public:
     absl::Status OnClientInitialMetadata(ClientMetadata& md,
                                          RbacFilter* filter);
-    static const NoInterceptor OnServerInitialMetadata;
-    static const NoInterceptor OnServerTrailingMetadata;
-    static const NoInterceptor OnClientToServerMessage;
-    static const NoInterceptor OnServerToClientMessage;
-    static const NoInterceptor OnFinalize;
+    static inline const NoInterceptor OnServerInitialMetadata;
+    static inline const NoInterceptor OnServerTrailingMetadata;
+    static inline const NoInterceptor OnClientToServerMessage;
+    static inline const NoInterceptor OnClientToServerHalfClose;
+    static inline const NoInterceptor OnServerToClientMessage;
+    static inline const NoInterceptor OnFinalize;
   };
 
  private:
-  RbacFilter(size_t index,
-             EvaluateArgs::PerChannelArgs per_channel_evaluate_args);
-
   // The index of this filter instance among instances of the same filter.
   size_t index_;
   // Assigned index for service config data from the parser.

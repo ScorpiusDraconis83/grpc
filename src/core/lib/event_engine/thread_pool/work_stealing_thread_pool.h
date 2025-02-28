@@ -18,8 +18,9 @@
 #ifndef GRPC_SRC_CORE_LIB_EVENT_ENGINE_THREAD_POOL_WORK_STEALING_THREAD_POOL_H
 #define GRPC_SRC_CORE_LIB_EVENT_ENGINE_THREAD_POOL_WORK_STEALING_THREAD_POOL_H
 
+#include <grpc/event_engine/event_engine.h>
 #include <grpc/support/port_platform.h>
-
+#include <grpc/support/thd_id.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -29,21 +30,16 @@
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
-
-#include <grpc/event_engine/event_engine.h>
-#include <grpc/support/thd_id.h>
-
-#include "src/core/lib/backoff/backoff.h"
 #include "src/core/lib/event_engine/thread_pool/thread_count.h"
 #include "src/core/lib/event_engine/thread_pool/thread_pool.h"
 #include "src/core/lib/event_engine/work_queue/basic_work_queue.h"
 #include "src/core/lib/event_engine/work_queue/work_queue.h"
-#include "src/core/lib/gprpp/notification.h"
-#include "src/core/lib/gprpp/sync.h"
-#include "src/core/lib/gprpp/time.h"
+#include "src/core/util/backoff.h"
+#include "src/core/util/notification.h"
+#include "src/core/util/sync.h"
+#include "src/core/util/time.h"
 
-namespace grpc_event_engine {
-namespace experimental {
+namespace grpc_event_engine::experimental {
 
 class WorkStealingThreadPool final : public ThreadPool {
  public:
@@ -156,11 +152,7 @@ class WorkStealingThreadPool final : public ThreadPool {
     class Lifeguard {
      public:
       explicit Lifeguard(WorkStealingThreadPoolImpl* pool);
-      // Start the lifeguard thread.
-      void Start();
-      // Block until the lifeguard thread is shut down.
-      // Afterwards, reset the lifeguard state so it can start again cleanly.
-      void BlockUntilShutdownAndReset();
+      ~Lifeguard();
 
      private:
       // The main body of the lifeguard thread.
@@ -195,7 +187,8 @@ class WorkStealingThreadPool final : public ThreadPool {
     // at a time.
     std::atomic<bool> throttled_{false};
     WorkSignal work_signal_;
-    Lifeguard lifeguard_;
+    grpc_core::Mutex lifeguard_ptr_mu_;
+    std::unique_ptr<Lifeguard> lifeguard_ ABSL_GUARDED_BY(lifeguard_ptr_mu_);
     // Set of threads for verbose failure debugging
     grpc_core::Mutex thd_set_mu_;
     absl::flat_hash_set<gpr_thd_id> thds_ ABSL_GUARDED_BY(thd_set_mu_);
@@ -226,7 +219,6 @@ class WorkStealingThreadPool final : public ThreadPool {
   const std::shared_ptr<WorkStealingThreadPoolImpl> pool_;
 };
 
-}  // namespace experimental
-}  // namespace grpc_event_engine
+}  // namespace grpc_event_engine::experimental
 
 #endif  // GRPC_SRC_CORE_LIB_EVENT_ENGINE_THREAD_POOL_WORK_STEALING_THREAD_POOL_H

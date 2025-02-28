@@ -17,27 +17,20 @@
 #ifndef GRPC_SRC_CORE_CLIENT_CHANNEL_SUBCHANNEL_STREAM_CLIENT_H
 #define GRPC_SRC_CORE_CLIENT_CHANNEL_SUBCHANNEL_STREAM_CLIENT_H
 
-#include <grpc/support/port_platform.h>
-
-#include <atomic>
-#include <memory>
-
-#include "absl/base/thread_annotations.h"
-#include "absl/status/status.h"
-#include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
-
 #include <grpc/event_engine/event_engine.h>
 #include <grpc/event_engine/memory_allocator.h>
 #include <grpc/slice.h>
 #include <grpc/status.h>
+#include <grpc/support/port_platform.h>
 
+#include <atomic>
+#include <memory>
+#include <optional>
+
+#include "absl/base/thread_annotations.h"
+#include "absl/status/status.h"
+#include "absl/strings/string_view.h"
 #include "src/core/client_channel/subchannel.h"
-#include "src/core/lib/backoff/backoff.h"
-#include "src/core/lib/channel/context.h"
-#include "src/core/lib/gprpp/orphanable.h"
-#include "src/core/lib/gprpp/ref_counted_ptr.h"
-#include "src/core/lib/gprpp/sync.h"
 #include "src/core/lib/iomgr/call_combiner.h"
 #include "src/core/lib/iomgr/closure.h"
 #include "src/core/lib/iomgr/error.h"
@@ -49,6 +42,10 @@
 #include "src/core/lib/slice/slice_buffer.h"
 #include "src/core/lib/transport/metadata_batch.h"
 #include "src/core/lib/transport/transport.h"
+#include "src/core/util/backoff.h"
+#include "src/core/util/orphanable.h"
+#include "src/core/util/ref_counted_ptr.h"
+#include "src/core/util/sync.h"
 
 namespace grpc_core {
 
@@ -61,7 +58,7 @@ namespace grpc_core {
 //
 // Currently, this assumes server-side streaming, but it could be extended
 // to support full bidi streaming if there is a need in the future.
-class SubchannelStreamClient
+class SubchannelStreamClient final
     : public InternallyRefCounted<SubchannelStreamClient> {
  public:
   // Interface implemented by caller.  Thread safety is provided for the
@@ -112,7 +109,7 @@ class SubchannelStreamClient
 
  private:
   // Contains a call to the backend and all the data related to the call.
-  class CallState : public Orphanable {
+  class CallState final : public Orphanable {
    public:
     CallState(RefCountedPtr<SubchannelStreamClient> client,
               grpc_pollset_set* interested_parties);
@@ -146,9 +143,8 @@ class SubchannelStreamClient
     RefCountedPtr<SubchannelStreamClient> subchannel_stream_client_;
     grpc_polling_entity pollent_;
 
-    ScopedArenaPtr arena_;
+    RefCountedPtr<Arena> arena_;
     CallCombiner call_combiner_;
-    grpc_call_context_element context_[GRPC_CONTEXT_COUNT] = {};
 
     // The streaming call to the backend. Always non-null.
     // Refs are tracked manually; when the last ref is released, the
@@ -176,7 +172,7 @@ class SubchannelStreamClient
     grpc_closure recv_initial_metadata_ready_;
 
     // recv_message
-    absl::optional<SliceBuffer> recv_message_;
+    std::optional<SliceBuffer> recv_message_;
     grpc_closure recv_message_ready_;
     std::atomic<bool> seen_response_{false};
 
@@ -201,7 +197,7 @@ class SubchannelStreamClient
   RefCountedPtr<ConnectedSubchannel> connected_subchannel_;
   grpc_pollset_set* interested_parties_;  // Do not own.
   const char* tracer_;
-  MemoryAllocator call_allocator_;
+  RefCountedPtr<CallArenaAllocator> call_allocator_;
 
   Mutex mu_;
   std::unique_ptr<CallEventHandler> event_handler_ ABSL_GUARDED_BY(mu_);
@@ -212,7 +208,7 @@ class SubchannelStreamClient
 
   // Call retry state.
   BackOff retry_backoff_ ABSL_GUARDED_BY(mu_);
-  absl::optional<grpc_event_engine::experimental::EventEngine::TaskHandle>
+  std::optional<grpc_event_engine::experimental::EventEngine::TaskHandle>
       retry_timer_handle_ ABSL_GUARDED_BY(mu_);
   // A raw pointer will suffice since connected_subchannel_ holds a copy of the
   // ChannelArgs which holds an std::shared_ptr of the EventEngine.

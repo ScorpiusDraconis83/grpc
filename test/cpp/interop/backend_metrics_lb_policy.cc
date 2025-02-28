@@ -16,12 +16,13 @@
 //
 //
 
-#include <grpc/support/port_platform.h>
-
 #include "test/cpp/interop/backend_metrics_lb_policy.h"
 
-#include "absl/strings/str_format.h"
+#include <grpc/support/port_platform.h>
 
+#include "absl/log/check.h"
+#include "absl/log/log.h"
+#include "absl/strings/str_format.h"
 #include "src/core/lib/iomgr/pollset_set.h"
 #include "src/core/load_balancing/delegating_helper.h"
 #include "src/core/load_balancing/oob_backend_metric.h"
@@ -44,7 +45,7 @@ constexpr absl::string_view kMetricsTrackerArgument = "orca_metrics_tracker";
 LoadReportTracker::LoadReportEntry BackendMetricDataToOrcaLoadReport(
     const grpc_core::BackendMetricData* backend_metric_data) {
   if (backend_metric_data == nullptr) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   TestOrcaReport load_report;
   load_report.set_cpu_utilization(backend_metric_data->cpu_utilization);
@@ -66,7 +67,7 @@ class BackendMetricsLbPolicy : public LoadBalancingPolicy {
       : LoadBalancingPolicy(std::move(args), /*initial_refcount=*/2) {
     load_report_tracker_ =
         channel_args().GetPointer<LoadReportTracker>(kMetricsTrackerArgument);
-    GPR_ASSERT(load_report_tracker_ != nullptr);
+    CHECK_NE(load_report_tracker_, nullptr);
     Args delegate_args;
     delegate_args.work_serializer = work_serializer();
     delegate_args.args = channel_args();
@@ -110,7 +111,7 @@ class BackendMetricsLbPolicy : public LoadBalancingPolicy {
       // Do pick.
       PickResult result = delegate_picker_->Pick(args);
       // Intercept trailing metadata.
-      auto* complete_pick = absl::get_if<PickResult::Complete>(&result.result);
+      auto* complete_pick = std::get_if<PickResult::Complete>(&result.result);
       if (complete_pick != nullptr) {
         complete_pick->subchannel_call_tracker =
             std::make_unique<SubchannelCallTracker>(load_report_tracker_);
@@ -237,11 +238,11 @@ void LoadReportTracker::RecordOobLoadReport(
   load_reports_cv_.Signal();
 }
 
-absl::optional<LoadReportTracker::LoadReportEntry>
+std::optional<LoadReportTracker::LoadReportEntry>
 LoadReportTracker::GetNextLoadReport() {
   grpc_core::MutexLock lock(&load_reports_mu_);
   if (per_rpc_load_reports_.empty()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   auto report = std::move(per_rpc_load_reports_.front());
   per_rpc_load_reports_.pop_front();
@@ -257,17 +258,17 @@ LoadReportTracker::LoadReportEntry LoadReportTracker::WaitForOobLoadReport(
     if (oob_load_reports_.empty()) {
       load_reports_cv_.WaitWithTimeout(&load_reports_mu_, poll_timeout);
       if (oob_load_reports_.empty()) {
-        return absl::nullopt;
+        return std::nullopt;
       }
     }
     auto report = std::move(oob_load_reports_.front());
     oob_load_reports_.pop_front();
     if (predicate(report)) {
-      gpr_log(GPR_DEBUG, "Report #%" PRIuPTR " matched", i + 1);
+      VLOG(2) << "Report #" << (i + 1) << " matched";
       return report;
     }
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 void LoadReportTracker::ResetCollectedLoadReports() {

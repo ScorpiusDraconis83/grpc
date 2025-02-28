@@ -14,11 +14,10 @@
 
 #include "src/cpp/ext/chaotic_good.h"
 
-#include "gtest/gtest.h"
-
 #include <grpcpp/create_channel.h>
 
-#include "test/core/util/test_config.h"
+#include "gtest/gtest.h"
+#include "test/core/test_util/test_config.h"
 
 namespace grpc {
 namespace {

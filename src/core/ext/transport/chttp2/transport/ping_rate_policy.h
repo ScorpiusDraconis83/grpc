@@ -16,16 +16,14 @@
 #define GRPC_SRC_CORE_EXT_TRANSPORT_CHTTP2_TRANSPORT_PING_RATE_POLICY_H
 
 #include <grpc/support/port_platform.h>
-
 #include <stddef.h>
 
 #include <iosfwd>
 #include <string>
-
-#include "absl/types/variant.h"
+#include <variant>
 
 #include "src/core/lib/channel/channel_args.h"
-#include "src/core/lib/gprpp/time.h"
+#include "src/core/util/time.h"
 
 namespace grpc_core {
 
@@ -51,7 +49,7 @@ class Chttp2PingRatePolicy {
     }
   };
   using RequestSendPingResult =
-      absl::variant<SendGranted, TooManyRecentPings, TooSoon>;
+      std::variant<SendGranted, TooManyRecentPings, TooSoon>;
 
   // Request that one ping be sent.
   // Returns:
@@ -70,13 +68,14 @@ class Chttp2PingRatePolicy {
   void ReceivedDataFrame();
   std::string GetDebugString() const;
 
-  int TestOnlyMaxPingsWithoutData() const { return max_pings_without_data_; }
+  int TestOnlyMaxPingsWithoutData() const {
+    return max_pings_without_data_sent_;
+  }
 
  private:
-  const int max_pings_without_data_;
+  const int max_pings_without_data_sent_;
   const int max_inflight_pings_;
-  // No pings allowed before receiving a header or data frame.
-  int pings_before_data_required_ = 0;
+  int pings_before_data_sending_required_ = 0;
   Timestamp last_ping_sent_time_ = Timestamp::InfPast();
 };
 

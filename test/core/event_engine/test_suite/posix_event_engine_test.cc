@@ -11,19 +11,18 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#include <memory>
-
-#include <gtest/gtest.h>
-
 #include <grpc/grpc.h>
 
+#include <memory>
+
+#include "gtest/gtest.h"
 #include "src/core/lib/event_engine/posix_engine/posix_engine.h"
 #include "test/core/event_engine/test_suite/event_engine_test_framework.h"
 #include "test/core/event_engine/test_suite/posix/oracle_event_engine_posix.h"
 #include "test/core/event_engine/test_suite/tests/client_test.h"
 #include "test/core/event_engine/test_suite/tests/server_test.h"
 #include "test/core/event_engine/test_suite/tests/timer_test.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/test_config.h"
 
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
